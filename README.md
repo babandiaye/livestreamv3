@@ -1,6 +1,8 @@
-# LiveStreamV2 — Plateforme Webinaire UN-CHK
+# LiveStreamV3 — Plateforme Webinaire UN-CHK
 
-Plateforme de webinaire institutionnelle basée sur LiveKit, Next.js 15, Prisma et Keycloak SSO. Intègre un plugin Moodle natif pour la gestion des sessions depuis le LMS.
+Plateforme de webinaire institutionnelle basée sur **LiveKit**, **Next.js 15**, **Prisma 7** et **Keycloak SSO**. Intègre un plugin Moodle natif pour la gestion des sessions depuis le LMS.
+
+> **v3** est une refonte architecturale de v2 : architecture modulaire (composants UI réutilisables, services métier, types centralisés), landing page publique, middleware sécurisé et nouvelle route S3 signée pour les enregistrements.
 
 ---
 
@@ -8,13 +10,15 @@ Plateforme de webinaire institutionnelle basée sur LiveKit, Next.js 15, Prisma 
 
 | Composant | Technologie |
 |-----------|-------------|
-| Frontend | Next.js 15, React 19, TypeScript |
-| Temps réel | LiveKit (WebRTC) |
-| Base de données | PostgreSQL 16 + Prisma 7 |
-| Auth | Keycloak SSO via NextAuth |
-| Stockage vidéo | MinIO (compatible S3) |
-| LMS | Moodle 4.5+ + Plugin PHP mod_livestream |
-| Serveur | Ubuntu 22/24, Node.js 20+, pnpm |
+| Frontend | Next.js 15.1, React 19, TypeScript 5.7 |
+| Temps réel | LiveKit 2.9 (WebRTC) + Egress + Ingress |
+| Base de données | PostgreSQL 16 + Prisma 7.5 |
+| Auth | Keycloak SSO via NextAuth 5 |
+| Stockage vidéo | MinIO (S3-compatible) |
+| LMS | Moodle 4.5+ + plugin `mod_livestream` |
+| UI | Radix UI + TailwindCSS 3.4 |
+| Tableau blanc | Excalidraw |
+| Serveur | Ubuntu 22/24, Node.js 20+, pnpm 9+ |
 | Process manager | systemd |
 | Orchestration | Docker Compose |
 
@@ -25,43 +29,42 @@ Plateforme de webinaire institutionnelle basée sur LiveKit, Next.js 15, Prisma 
 ### Système
 - Ubuntu 22.04 ou 24.04
 - Node.js >= 20
-- pnpm >= 9
+- pnpm >= 9 (`npm install -g pnpm`)
 - Docker + Docker Compose
 - Git
 
-### Services requis (à déployer séparément)
+### Services requis
 - **LiveKit Server** — SFU WebRTC
-- **LiveKit Egress** — enregistrement vidéo
+- **LiveKit Egress** — enregistrement composite
 - **LiveKit Ingress** — flux OBS/RTMP
 - **Redis** — coordination LiveKit
 - **PostgreSQL 16** — base de données
 - **MinIO** — stockage S3 des enregistrements
 - **Keycloak** — SSO institutionnel
-- **Moodle 4.5+** — LMS
+- **Moodle 4.5+** — LMS (optionnel)
 
 ---
 
-## Infrastructure Docker (LiveKit Stack)
+## Infrastructure Docker (stack LiveKit)
 
-Le fichier `compose.yaml` orchestre les services LiveKit :
+Le fichier `/opt/livekit/compose.yaml` orchestre les services LiveKit :
 ```yaml
-# /opt/livekit/compose.yaml
 services:
-  postgresql:   # PostgreSQL 16 — base de données
+  postgresql:   # PostgreSQL 16
   redis:        # Redis 7 — coordination LiveKit
-  livekit:      # LiveKit SFU — moteur WebRTC
-  egress:       # LiveKit Egress — enregistrement + streaming
-  ingress:      # LiveKit Ingress — flux OBS RTMP/WHIP
+  livekit:      # LiveKit SFU
+  egress:       # LiveKit Egress — enregistrement
+  ingress:      # LiveKit Ingress — OBS RTMP/WHIP
 ```
 
-### Démarrer la stack LiveKit
+### Démarrer la stack
 ```bash
 cd /opt/livekit
 docker compose up -d
 docker compose ps
 ```
 
-### Variables d'environnement PostgreSQL
+### Variables PostgreSQL
 ```bash
 # /opt/livekit/env.d/postgresql
 POSTGRES_DB=<nom_base>
@@ -71,12 +74,12 @@ POSTGRES_PASSWORD=<mot_de_passe>
 
 ---
 
-## Installation LiveStreamV2
+## Déploiement LiveStreamV3
 
 ### 1. Cloner le dépôt
 ```bash
-git clone git@github.com:babandiaye/livestreamv2.git /var/www/html/livestreamv2
-cd /var/www/html/livestreamv2
+git clone git@github.com:<org>/livestreamv3.git /var/www/html/livestreamv3
+cd /var/www/html/livestreamv3
 git checkout main
 ```
 
@@ -87,14 +90,15 @@ pnpm install
 
 ### 3. Configurer les variables d'environnement
 ```bash
-cp .env.example .env
+cp env.example .env
 nano .env
 ```
+Voir la section [Variables d'environnement](#variables-denvironnement-env).
 
 ### 4. Initialiser la base de données
 ```bash
-pnpm prisma migrate deploy
 pnpm prisma generate
+pnpm prisma migrate deploy
 ```
 
 ### 5. Builder l'application
@@ -104,7 +108,7 @@ pnpm build
 
 ### 6. Configurer le service systemd
 ```bash
-nano /etc/systemd/system/livestream.service
+sudo nano /etc/systemd/system/livestream.service
 ```
 ```ini
 [Unit]
@@ -114,27 +118,53 @@ After=network.target
 [Service]
 User=root
 Group=root
-WorkingDirectory=/var/www/html/livestreamv2
+WorkingDirectory=/var/www/html/livestreamv3
 ExecStart=/usr/bin/pnpm start
 Restart=always
 RestartSec=5
 Environment="NODE_ENV=production"
 LimitNOFILE=50000
-StandardOutput=append:/var/log/livestream_outpout.log
+StandardOutput=append:/var/log/livestream_output.log
 StandardError=append:/var/log/livestream_error.log
 
 [Install]
 WantedBy=multi-user.target
 ```
 ```bash
-systemctl daemon-reload
-systemctl enable livestream
-systemctl start livestream
+sudo systemctl daemon-reload
+sudo systemctl enable livestream
+sudo systemctl start livestream
+sudo systemctl status livestream
+```
+
+L'application écoute sur le port **4000** (défini dans `package.json` → `next start -p 4000`).
+
+### 7. (Optionnel) Reverse proxy Nginx
+```nginx
+server {
+  listen 443 ssl http2;
+  server_name <votre-domaine>;
+  ssl_certificate     /etc/letsencrypt/live/<domaine>/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/<domaine>/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:4000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 100M;
+  }
+}
 ```
 
 ---
 
 ## Variables d'environnement (.env)
+
 ```env
 # ── Application ──────────────────────────────────────
 NEXT_PUBLIC_SITE_URL=https://<votre-domaine>
@@ -175,75 +205,102 @@ MOODLE_API_KEY=<cle-api-sans-caracteres-speciaux>
 WATCH_PUBLIC=true
 ```
 
-> **Note** : `NEXT_PUBLIC_LIVEKIT_URL` est requis pour la page `/egress-layout` (enregistrement composite).
-> La clé `MOODLE_API_KEY` ne doit pas contenir de caractères spéciaux (`#`, `$`, `!`, etc.).
+> **Notes**
+> - `NEXT_PUBLIC_LIVEKIT_URL` est requis pour `/egress-layout` (enregistrement composite).
+> - `MOODLE_API_KEY` ne doit pas contenir de caractères spéciaux (`#`, `$`, `!`, etc.).
+> - `WATCH_PUBLIC=true` autorise l'accès anonyme à `/watch/[roomName]`.
+> - Si `KEYCLOAK_ENABLED=false`, l'app bascule sur un provider Credentials local.
 
 ---
 
-## Commandes de déploiement
+## Structure du projet (v3)
 
-### Déployer une mise à jour
+```
+src/
+├── app/
+│   ├── home.client.tsx         # Landing page publique (v3)
+│   ├── admin/                  # Dashboard administrateur
+│   ├── moderator/              # Dashboard modérateur
+│   ├── student/                # Dashboard étudiant
+│   ├── host/                   # Interface animateur (stream)
+│   ├── watch/[roomName]/       # Page spectateur
+│   ├── egress-layout/          # Layout composite pour l'enregistrement
+│   └── api/                    # Routes API (38 endpoints)
+├── components/
+│   ├── layout/                 # Sidebar, Footer
+│   └── ui/                     # Avatar, Badge, Pagination, RecordingList, EnrollPanel
+├── lib/
+│   ├── services/               # enrollment / recording / session
+│   ├── controller.ts           # Orchestration LiveKit
+│   └── prisma.ts
+├── types/index.ts              # Types centralisés + utilitaires (formatDuration, formatSize)
+├── auth.ts                     # NextAuth config (Keycloak + Credentials)
+└── middleware.ts               # Gardien des routes
+```
+
+---
+
+## Déployer une mise à jour
+
 ```bash
-cd /var/www/html/livestreamv2
+cd /var/www/html/livestreamv3
 git pull origin main
 pnpm install
 pnpm prisma migrate deploy
 pnpm build
-service livestream restart
+sudo systemctl restart livestream
 ```
 
-### Vérifier les logs
+---
+
+## Commandes utiles
+
+### Logs & service
 ```bash
-tail -f /var/log/livestream_outpout.log
+sudo systemctl status livestream
+sudo systemctl restart livestream
+tail -f /var/log/livestream_output.log
 tail -f /var/log/livestream_error.log
-systemctl status livestream
-docker logs livekit_egress -f
+sudo docker logs livekit_egress -f
 ```
 
-### Gérer le service
-```bash
-service livestream restart
-service livestream stop
-service livestream start
-```
-
-### Gérer la stack Docker LiveKit
+### Stack Docker LiveKit
 ```bash
 cd /opt/livekit
-docker compose up -d
-docker compose down
-docker compose restart egress
-docker compose logs egress -f
-docker compose ps
+sudo docker compose up -d
+sudo docker compose restart egress
+sudo docker compose logs egress -f
+sudo docker compose ps
 ```
 
-### Commandes base de données utiles
+### Base de données
 ```bash
-# Accéder à PostgreSQL
-docker exec -it livekit_postgresql psql -U <user> -d <database> -h 127.0.0.1
+# Accès interactif PostgreSQL
+sudo docker exec -it livekit_postgresql psql -U <user> -d <database>
 
 # Lister les sessions
-docker exec livekit_postgresql psql -U <user> -d <database> -h 127.0.0.1 \
+sudo docker exec livekit_postgresql psql -U <user> -d <database> \
   -c "SELECT id, \"roomName\", status, \"createdAt\" FROM \"Session\" ORDER BY \"createdAt\" DESC LIMIT 10;"
 
-# Lister les enregistrements avec statut
-docker exec livekit_postgresql psql -U <user> -d <database> -h 127.0.0.1 \
-  -c "SELECT filename, status, \"startedAt\", \"createdAt\" FROM \"Recording\" ORDER BY \"createdAt\" DESC LIMIT 10;"
+# Lister les enregistrements
+sudo docker exec livekit_postgresql psql -U <user> -d <database> \
+  -c "SELECT filename, status, \"createdAt\" FROM \"Recording\" ORDER BY \"createdAt\" DESC LIMIT 10;"
 
 # Forcer le statut ENDED d'une session
-docker exec livekit_postgresql psql -U <user> -d <database> -h 127.0.0.1 \
+sudo docker exec livekit_postgresql psql -U <user> -d <database> \
   -c "UPDATE \"Session\" SET status = 'ENDED', \"endedAt\" = NOW() WHERE \"roomName\" = '<room-name>';"
 
-# Corriger les anciens enregistrements PROCESSING sans fichier réel
-docker exec livekit_postgresql psql -U <user> -d <database> -h 127.0.0.1 \
-  -c "UPDATE \"Recording\" SET status = 'READY' WHERE status = 'PROCESSING' AND filename != 'Enregistrement en cours…';"
+# Activer chat + participation sur toutes les salles
+sudo docker exec livekit_postgresql psql -U <user> -d <database> \
+  -c "UPDATE \"Session\" SET \"chatEnabled\" = true, \"participationEnabled\" = true;"
 ```
 
-### Prisma (migrations)
+### Prisma
 ```bash
-pnpm prisma migrate deploy
-pnpm prisma migrate status
-pnpm prisma generate
+pnpm prisma migrate deploy       # Applique les migrations en prod
+pnpm prisma migrate status       # État des migrations
+pnpm prisma generate             # Régénère le client Prisma
+pnpm prisma studio               # Interface graphique (dev)
 ```
 
 ---
@@ -253,13 +310,11 @@ pnpm prisma generate
 ### Installation
 ```bash
 cp -r mod_livestream /var/www/html/<moodle>/mod/livestream/
-chown -R www-data:www-data /var/www/html/<moodle>/mod/livestream/
+sudo chown -R www-data:www-data /var/www/html/<moodle>/mod/livestream/
 ```
+Puis **Administration Moodle → Notifications** pour finaliser l'installation.
 
-Puis **Administration Moodle → Notifications** pour finaliser.
-
-### Configuration admin Moodle
-
+### Configuration
 | Paramètre | Valeur |
 |-----------|--------|
 | URL LiveStream | `https://<votre-domaine>` |
@@ -267,9 +322,8 @@ Puis **Administration Moodle → Notifications** pour finaliser.
 | Timeout | `30` secondes |
 | Enrôlement auto | Activé |
 
-### API Moodle disponibles
-
-Toutes les routes nécessitent le header `X-Api-Key: <MOODLE_API_KEY>`.
+### API Moodle
+Toutes les routes exigent le header `X-Api-Key: <MOODLE_API_KEY>`.
 
 | Méthode | Route | Description |
 |---------|-------|-------------|
@@ -283,36 +337,60 @@ Toutes les routes nécessitent le header `X-Api-Key: <MOODLE_API_KEY>`.
 
 ---
 
-## Enregistrement composite (Egress layout custom)
+## Rôles utilisateurs
 
-Depuis la v4.3.0, l'enregistrement capture en une seule vidéo MP4 :
-- **Partage d'écran** au centre (contenu principal)
-- **Caméra animateur** en PiP bas droite
-- **Chat en direct** dans un panneau latéral
-- **Tableau blanc** synchronisé via data channels LiveKit
-- **Audio** de tous les participants sur scène
+| Rôle | Redirection | Accès |
+|------|-------------|-------|
+| `ADMIN` | `/admin` | Gestion complète — salles, utilisateurs, enregistrements, statut services |
+| `MODERATOR` | `/moderator` | Ses salles, enrôlement CSV/individuel, ses enregistrements |
+| `VIEWER` | `/student` | Sessions auxquelles il est enrôlé |
 
-Le flux technique :
+---
+
+## Enrôlement CSV
+
+Format :
+```csv
+email,prenom,nom
+etudiant@domaine.sn,Prénom,Nom
 ```
-Bouton "Enregistrer" → start_recording API
+- Séparateur `,` ou `;`
+- Colonne `email` obligatoire
+- Utilisateurs inexistants créés automatiquement
+- Batch de 500 — jusqu'à 10 000 utilisateurs
+- Pagination 20 par lot dans l'interface
+
+---
+
+## Enregistrement composite (Egress layout)
+
+L'enregistrement capture en un seul MP4 :
+- Partage d'écran (contenu principal)
+- Caméra animateur (PiP bas droite)
+- Chat en direct (panneau latéral)
+- Tableau blanc synchronisé (data channels LiveKit)
+- Audio de tous les participants sur scène
+
+Flux technique :
+```
+Bouton "Enregistrer" → /api/start_recording
   → startWebEgress(url=/egress-layout?roomName=xxx)
   → Egress Chrome charge la page
   → /api/egress-token génère un token viewer caché
-  → La page se connecte à la room LiveKit
-  → Demande l'historique du tableau blanc (__wb_request_init__)
   → Enregistrement MP4 1080p 60fps → MinIO S3
+  → Webhook met à jour le statut en base
 ```
 
-Statuts de l'enregistrement :
 | Statut | Description |
 |--------|-------------|
-| `PROCESSING` | Enregistrement en cours — badge ⏳ jaune |
-| `READY` | Fichier disponible — boutons Voir/Télécharger actifs |
-| `FAILED` | Échec Egress — badge ✗ rouge |
+| `PROCESSING` | En cours — badge jaune |
+| `READY` | Disponible — Voir/Télécharger |
+| `FAILED` | Échec Egress — badge rouge |
 
 ---
 
 ## Architecture
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    Moodle (LMS)                     │
@@ -320,14 +398,14 @@ Statuts de l'enregistrement :
 └────────────────────┬────────────────────────────────┘
                      │ API REST (X-Api-Key)
 ┌────────────────────▼────────────────────────────────┐
-│           LiveStreamV2 (Next.js 15)                 │
-│  /host  /watch  /admin  /moderator  /student        │
-│  /egress-layout  (composite recording page)         │
-│              API Routes Next.js                     │
+│           LiveStreamV3 (Next.js 15)                 │
+│  /  /admin  /moderator  /student  /host  /watch     │
+│  /egress-layout  (composite recording)              │
+│              API Routes (38 endpoints)              │
 └──────┬──────────────┬──────────────┬────────────────┘
        │              │              │
-┌──────▼──────┐ ┌─────▼─────┐ ┌────▼────────┐
-│  LiveKit    │ │PostgreSQL │ │   MinIO S3  │
+┌──────▼──────┐ ┌─────▼─────┐ ┌─────▼──────┐
+│  LiveKit    │ │PostgreSQL │ │  MinIO S3  │
 │  (WebRTC)   │ │ (Prisma)  │ │(Enreg. MP4)│
 │  + Egress   │ └───────────┘ └────────────┘
 └──────┬──────┘
@@ -340,45 +418,11 @@ Statuts de l'enregistrement :
 
 ---
 
-## Rôles utilisateurs
-
-| Rôle | Redirection | Accès |
-|------|-------------|-------|
-| `ADMIN` | `/admin` | Gestion complète — salles, utilisateurs, enregistrements |
-| `MODERATOR` | `/moderator` | Ses salles, enrôlement CSV/individuel, enregistrements |
-| `VIEWER` | `/student` | Sessions auxquelles il est enrôlé |
-
----
-
-## Enrôlement CSV
-
-Format accepté :
-```csv
-email,prenom,nom
-etudiant@domaine.sn,Prénom,Nom
-```
-
-- Séparateur `,` ou `;`
-- Colonne `email` obligatoire, `prenom` et `nom` optionnels
-- Utilisateurs inexistants créés automatiquement
-- Batch de 500 — supporte jusqu'à 10 000 utilisateurs
-- Pagination par lot de 50 dans les interfaces
-
----
-
 ## Versions
 
 | Version | Description |
 |---------|-------------|
-| v1.0.0 | MVP — LiveKit + auth Keycloak |
-| v2.0.0 | Enrôlement, enregistrements S3, dashboard admin |
-| v3.0.0 | Plugin Moodle + fix Egress + CSV + statut session + kick |
-| v4.0.0 | Redesign sidebar UN-CHK + pagination 50 |
-| v4.1.0 | Page /watch redesign + logo + responsive mobile |
-| v4.2.0 | Statut enregistrement PROCESSING/READY/FAILED |
-| v4.3.0 | Egress layout custom cam+chat+écran + webhook web egress |
-| v4.4.0 | Tableau blanc collaboratif canvas HTML5 + egress sync |
-| v4.5.0 | Tableau blanc intégré zone principale host/watch/egress + qualité enregistrement 1080p 60fps 4.5Mbps |
+| **v1-refonte** | Refonte architecturale de la plateforme : composants UI réutilisables, services métier, types centralisés, landing page publique, middleware sécurisé, URL S3 signées pour les enregistrements, sidebar avec icônes SVG |
 
 ---
 
