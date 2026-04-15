@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Sidebar from "@/components/layout/Sidebar"
 import Footer from "@/components/layout/Footer"
 import Pagination from "@/components/ui/Pagination"
@@ -28,11 +28,17 @@ export default function StudentClient({
   const [roomPage, setRoomPage] = useState(1)
   const [recPage, setRecPage] = useState(1)
 
-  useEffect(() => {
-    fetch("/api/rooms")
-      .then((r) => r.json())
-      .then((d) => { setRooms(d.rooms ?? []); setLoading(false) })
+  const fetchRooms = useCallback(async () => {
+    const d = await (await fetch("/api/rooms")).json()
+    setRooms(d.rooms ?? [])
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    fetchRooms()
+    const interval = setInterval(fetchRooms, 30000)
+    return () => clearInterval(interval)
+  }, [fetchRooms])
 
   const allRecordings = rooms.flatMap((r) => r.recordings)
 
@@ -69,7 +75,7 @@ export default function StudentClient({
 
       const data = await res.json()
       window.location.href = `/watch/${room.roomName}?token=${data.connection_details.token}`
-    } catch (e) {
+    } catch {
       alert("Erreur réseau")
       setJoining(false)
     }
@@ -98,11 +104,19 @@ export default function StudentClient({
           {nav === "rooms" && (
             <div style={{ display: "flex", gap: 20 }}>
               <div style={{ flex: selectedRoom ? "0 0 380px" : 1, minWidth: 0 }}>
+
+                {/* Header */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                   <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>Mes sessions</h2>
                   <span style={{ background: "#e8f4ff", color: "#0065b1", fontSize: 13, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>
                     {rooms.length}
                   </span>
+                  <button
+                    onClick={fetchRooms}
+                    style={{ marginLeft: 4, padding: "4px 10px", background: "white", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 12, color: "#6b7280", cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    ↻ Actualiser
+                  </button>
                 </div>
 
                 <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
@@ -134,7 +148,6 @@ export default function StudentClient({
                         {room.recordings.length > 0 && <span>🎬 {room.recordings.length} enreg.</span>}
                       </div>
 
-                      {/* Bouton rejoindre — visible pour LIVE et SCHEDULED */}
                       {room.status !== "ENDED" && (
                         <button
                           onClick={(e) => { e.stopPropagation(); joinSession(room) }}
