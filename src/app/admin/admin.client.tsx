@@ -12,11 +12,53 @@ import StatusPanel from "@/components/StatusPanel"
 import type { Room, UserRecord, Recording, Role } from "@/types"
 import { PAGE_SIZE } from "@/types"
 
-const NAV_ITEMS = [
-  { key: "rooms",      label: "Salles",          icon: "🏠" },
-  { key: "users",      label: "Utilisateurs",    icon: "👥" },
-  { key: "recordings", label: "Enregistrements", icon: "🎬" },
-  { key: "status",     label: "Statut services", icon: "⚙️" },
+const IconMonitor = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="3" width="20" height="14" rx="2"/>
+    <line x1="8" y1="21" x2="16" y2="21"/>
+    <line x1="12" y1="17" x2="12" y2="21"/>
+  </svg>
+)
+const IconUsers = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+    <circle cx="9" cy="7" r="4"/>
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+  </svg>
+)
+const IconVideo = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="23 7 16 12 23 17 23 7"/>
+    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+  </svg>
+)
+const IconActivity = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </svg>
+)
+
+const NAV_GROUPS = [
+  {
+    title: "Gestion",
+    items: [
+      { key: "rooms",      label: "Salles",       icon: <IconMonitor /> },
+      { key: "users",      label: "Utilisateurs", icon: <IconUsers /> },
+    ],
+  },
+  {
+    title: "Contenu",
+    items: [
+      { key: "recordings", label: "Enregistrements", icon: <IconVideo /> },
+    ],
+  },
+  {
+    title: "Système",
+    items: [
+      { key: "status", label: "Statut services", icon: <IconActivity /> },
+    ],
+  },
 ]
 
 export default function AdminClient({
@@ -25,7 +67,6 @@ export default function AdminClient({
   user: { id: string; name?: string | null; email?: string | null; role: Role }
 }) {
   const [nav, setNav] = useState<"rooms" | "users" | "recordings" | "status">("rooms")
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [users, setUsers] = useState<UserRecord[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
   const [recordings, setRecordings] = useState<Recording[]>([])
@@ -103,7 +144,7 @@ export default function AdminClient({
     setTitle("")
     setDescription("")
     setChatEnabled(true)
-    setParticipationEnabled(false)
+    setParticipationEnabled(true)
     setShowCreate(false)
     setCreating(false)
     await fetchRooms()
@@ -151,9 +192,7 @@ export default function AdminClient({
         user={user}
         nav={nav}
         onNav={(k) => setNav(k as typeof nav)}
-        items={NAV_ITEMS}
-        open={sidebarOpen}
-        onToggle={() => setSidebarOpen((v) => !v)}
+        groups={NAV_GROUPS}
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>

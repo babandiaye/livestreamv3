@@ -47,7 +47,7 @@ model Session {
   startedAt            DateTime?
   endedAt              DateTime?
   chatEnabled          Boolean       @default(true)
-  participationEnabled Boolean       @default(false)
+  participationEnabled Boolean       @default(true)
   moodleCourseId       String?
   moodleMeetingId      String?
   recordings           Recording[]

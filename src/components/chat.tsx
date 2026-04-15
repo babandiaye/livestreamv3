@@ -12,9 +12,8 @@ export function Chat() {
   const { localParticipant } = useLocalParticipant();
   const { metadata } = useRoomInfo();
 
-  const { enable_chat: chatEnabled } = (
-    metadata ? JSON.parse(metadata) : { enable_chat: true }
-  ) as RoomMetadata;
+  const parsed = metadata ? JSON.parse(metadata) : {};
+  const chatEnabled = parsed.enable_chat ?? true;
 
   // Dédupliquer les messages et filtrer les commandes internes
   const messages = useMemo(() => {

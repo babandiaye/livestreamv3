@@ -33,6 +33,8 @@ export async function GET() {
       creator: r.creator,
       enrollments: r._count.enrollments,
       recordings: r._count.recordings,
+      chatEnabled: r.chatEnabled,
+      participationEnabled: r.participationEnabled,
     })),
   })
 }

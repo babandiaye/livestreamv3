@@ -10,9 +10,28 @@ import EnrollPanel from "@/components/ui/EnrollPanel"
 import type { Room, Recording, Role } from "@/types"
 import { PAGE_SIZE } from "@/types"
 
-const NAV_ITEMS = [
-  { key: "rooms",      label: "Mes salles",       icon: "🏠" },
-  { key: "recordings", label: "Enregistrements",  icon: "🎬" },
+const IconMonitor = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="3" width="20" height="14" rx="2"/>
+    <line x1="8" y1="21" x2="16" y2="21"/>
+    <line x1="12" y1="17" x2="12" y2="21"/>
+  </svg>
+)
+const IconVideo = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="23 7 16 12 23 17 23 7"/>
+    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+  </svg>
+)
+
+const NAV_GROUPS = [
+  {
+    title: "Mes espaces",
+    items: [
+      { key: "rooms",      label: "Mes salles",      icon: <IconMonitor /> },
+      { key: "recordings", label: "Enregistrements", icon: <IconVideo /> },
+    ],
+  },
 ]
 
 export default function ModeratorClient({
@@ -21,7 +40,6 @@ export default function ModeratorClient({
   user: { id: string; name?: string | null; email?: string | null; role: Role }
 }) {
   const [nav, setNav] = useState<"rooms" | "recordings">("rooms")
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [rooms, setRooms] = useState<Room[]>([])
   const [recordings, setRecordings] = useState<Recording[]>([])
   const [loading, setLoading] = useState(false)
@@ -116,9 +134,7 @@ export default function ModeratorClient({
         user={user}
         nav={nav}
         onNav={(k) => setNav(k as typeof nav)}
-        items={NAV_ITEMS}
-        open={sidebarOpen}
-        onToggle={() => setSidebarOpen((v) => !v)}
+        groups={NAV_GROUPS}
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
