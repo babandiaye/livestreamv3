@@ -107,7 +107,7 @@ export async function POST(req: Request) {
         title: title.trim(),
         description: description?.trim() || null,
         chatEnabled: chatEnabled ?? true,
-        participationEnabled: participationEnabled ?? false,
+        participationEnabled: participationEnabled ?? true,
         creatorId: user.id,
       },
     })

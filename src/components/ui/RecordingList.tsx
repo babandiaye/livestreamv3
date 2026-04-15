@@ -92,8 +92,24 @@ export default function RecordingList({
             style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #f0f7ff", gap: 12 }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: rec.status === "READY" ? "#dcfce7" : rec.status === "FAILED" ? "#fee2e2" : "#fefce8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
-                {rec.status === "READY" ? "🎬" : rec.status === "FAILED" ? "⚠️" : "⏳"}
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: rec.status === "READY" ? "#e8f4ff" : rec.status === "FAILED" ? "#fee2e2" : "#fefce8", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: rec.status === "READY" ? "#0065b1" : rec.status === "FAILED" ? "#dc2626" : "#ca8a04" }}>
+                {rec.status === "READY" ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="23 7 16 12 23 17 23 7"/>
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                  </svg>
+                ) : rec.status === "FAILED" ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                )}
               </div>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 500, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
