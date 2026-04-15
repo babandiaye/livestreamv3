@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
         'Content-Length': fileSize.toString(),
         'Content-Type': 'video/mp4',
         'Accept-Ranges': 'bytes',
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': 'public, max-age=3600',
       },
     });
