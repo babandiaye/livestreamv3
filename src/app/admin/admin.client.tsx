@@ -43,7 +43,7 @@ export default function AdminClient({
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [chatEnabled, setChatEnabled] = useState(true)
-  const [participationEnabled, setParticipationEnabled] = useState(false)
+  const [participationEnabled, setParticipationEnabled] = useState(true)
   const [creating, setCreating] = useState(false)
 
   const fetchUsers = useCallback(async () => {

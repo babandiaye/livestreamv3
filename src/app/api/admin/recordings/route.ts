@@ -5,6 +5,40 @@ import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3"
 
 export const dynamic = "force-dynamic"
 
+export async function GET() {
+  const session = await auth()
+  if (!session || session.user.role !== "ADMIN")
+    return NextResponse.json({ error: "Non autorisé" }, { status: 403 })
+
+  const recordings = await prisma.recording.findMany({
+    orderBy: { createdAt: "desc" },
+    include: {
+      session: {
+        select: { id: true, title: true, roomName: true },
+      },
+    },
+  })
+
+  return NextResponse.json({
+    recordings: recordings.map(r => ({
+      id: r.id,
+      filename: r.filename,
+      status: r.status,
+      duration: r.duration,
+      size: r.size ? Number(r.size) : null,
+      s3Key: r.s3Key,
+      s3Bucket: r.s3Bucket,
+      egressId: r.egressId,
+      publishable: r.publishable,
+      startedAt: r.startedAt?.toISOString() ?? null,
+      createdAt: r.createdAt.toISOString(),
+      sessionId: r.sessionId,
+      sessionTitle: r.session?.title ?? null,
+      roomName: r.session?.roomName ?? null,
+    })),
+  })
+}
+
 export async function DELETE(req: Request) {
   const session = await auth()
   if (!session || session.user.role !== "ADMIN")
