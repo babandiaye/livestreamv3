@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Tableau blanc UN-CHK</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+  </style>
+  <!-- React 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Excalidraw standalone -->
+  <script src="https://unpkg.com/@excalidraw/excalidraw@0.17.6/dist/excalidraw.production.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const { Excalidraw } = ExcalidrawLib
+    const { createElement: h, useState, useEffect, useRef } = React
+    const isReadOnly = new URLSearchParams(location.search).get("readonly") === "true"
+
+    let _api = null
+    let _syncing = false
+
+    function App() {
+      return h(Excalidraw, {
+        excalidrawAPI: (api) => {
+          _api = api
+          window.parent.postMessage({ type: "wb-ready" }, "*")
+        },
+        onChange: (elements) => {
+          if (_syncing) return
+          window.parent.postMessage({
+            type: "wb-change",
+            elements: JSON.parse(JSON.stringify(elements))
+          }, "*")
+        },
+        viewModeEnabled: isReadOnly,
+        gridModeEnabled: true,
+        theme: "light",
+        langCode: "fr-FR",
+        UIOptions: {
+          canvasActions: {
+            export: false,
+            loadScene: false,
+            saveToActiveFile: false,
+            saveAsImage: true,
+          }
+        }
+      })
+    }
+
+    window.addEventListener("message", (e) => {
+      if (!_api) return
+      if (e.data.type === "wb-update") {
+        _syncing = true
+        _api.updateScene({ elements: e.data.elements })
+        setTimeout(() => { _syncing = false }, 200)
+      }
+      if (e.data.type === "wb-clear") {
+        _syncing = true
+        _api.updateScene({ elements: [] })
+        setTimeout(() => { _syncing = false }, 200)
+      }
+    })
+
+    const container = document.getElementById("root")
+    const root = ReactDOM.createRoot(container)
+    root.render(h(App))
+  </script>
+</body>
+</html>

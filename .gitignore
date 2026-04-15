@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.env
+.env.local
+*.pem
+*.key
+.claude
+tsconfig.tsbuildinfo
