@@ -1,0 +1,13 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Google Sans', 'Segoe UI', system-ui, sans-serif;
+  background: #f8fafd;
+  color: #202124;
+  -webkit-font-smoothing: antialiased;
+}
