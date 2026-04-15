@@ -168,7 +168,6 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     }
   }, [lastMsgTs]);
 
-  // ── Auto-activation du tableau blanc quand l'hôte l'active/désactive ──
   useEffect(() => {
     const last = chatMessages[chatMessages.length - 1]
     if (!last?.message) return
@@ -202,7 +201,6 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const stageParts = participants.filter(p => p.identity !== localParticipant.identity && getMeta(p).invited_to_stage);
   const stageCamTracks = camTracks.filter(t => stageParts.some(p => p.identity === t.participant.identity) && t.participant.identity !== hostId);
 
-  // Détermine le contenu principal
   const mainContent = showWhiteboard ? "whiteboard" : screenTrack ? "screen" : mainCamTrack ? "cam" : "avatar";
 
   if (sessionEnded) {
@@ -261,24 +259,20 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", background: "#010409" }}>
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", position: "relative" }}>
 
-            {/* ── TABLEAU BLANC dans la zone principale ── */}
             {mainContent === "whiteboard" && (
               <div style={{ position: "absolute", inset: 0, background: "white" }}>
                 <Whiteboard readOnly={true} />
               </div>
             )}
 
-            {/* ── PARTAGE D'ÉCRAN ── */}
             {mainContent === "screen" && (
               <VideoTrack trackRef={screenTrack!} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             )}
 
-            {/* ── CAMÉRA PRINCIPALE ── */}
             {mainContent === "cam" && (
               <VideoTrack trackRef={mainCamTrack!} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             )}
 
-            {/* ── AVATAR (rien d'actif) ── */}
             {mainContent === "avatar" && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, color: "#484f58", textAlign: "center" }}>
                 <div style={{ width: 80, height: 80, borderRadius: "50%", background: "#161b22", border: "1px solid #21262d", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -289,21 +283,18 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
               </div>
             )}
 
-            {/* Badge "Tableau blanc" quand actif */}
             {mainContent === "whiteboard" && (
               <div style={{ position: "absolute", top: 12, left: 12, background: "rgba(0,101,177,.85)", color: "white", fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 5, zIndex: 10 }}>
                 🖊 Tableau blanc
               </div>
             )}
 
-            {/* Name tag caméra */}
             {mainContent === "cam" && (
               <div style={{ position: "absolute", bottom: 12, left: 12, background: "rgba(1,4,9,.75)", backdropFilter: "blur(4px)", color: "#e6edf3", fontSize: 13, padding: "4px 12px", borderRadius: 5, border: "1px solid #21262d" }}>
                 {mainCamTrack!.participant.name ?? mainCamTrack!.participant.identity}
               </div>
             )}
 
-            {/* PiP caméra principale quand partage d'écran ou tableau actif */}
             {(mainContent === "screen" || mainContent === "whiteboard") && (
               <div style={{ position: "absolute", bottom: 16, right: 16, display: "flex", flexDirection: "column", gap: 8, zIndex: 10 }}>
                 {mainCamTrack && (
@@ -321,7 +312,6 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
               </div>
             )}
 
-            {/* Strip participants sur scène (seulement quand cam principale) */}
             {mainContent === "cam" && stageCamTracks.length > 0 && (
               <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, display: "flex", gap: 8, padding: 8, background: "rgba(13,17,23,.85)", overflowX: "auto" }}>
                 {stageCamTracks.map(t => (
@@ -333,7 +323,6 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
               </div>
             )}
 
-            {/* On Stage badge */}
             {onStage && (
               <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", background: "rgba(63,185,80,.15)", border: "1px solid #3fb950", color: "#3fb950", padding: "8px 18px", borderRadius: 24, fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 10, backdropFilter: "blur(4px)", zIndex: 20 }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
@@ -344,12 +333,10 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
 
             <StartAudio label="Cliquez pour activer le son" className="v-start-audio" />
 
-            {/* Floating emojis */}
             {floatingEmojis.map(fe => (
               <div key={fe.id} style={{ position: "absolute", bottom: "10%", left: `${fe.x}%`, fontSize: "3rem", zIndex: 50, pointerEvents: "none", animation: "w-floatUp 3s ease-out forwards" }}>{fe.emoji}</div>
             ))}
 
-            {/* Emoji picker */}
             {showEmojiPicker && (
               <div style={{ position: "absolute", bottom: 100, left: "50%", transform: "translateX(-50%)", background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: "12px 16px", display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: 300, boxShadow: "0 8px 32px rgba(0,0,0,.6)", zIndex: 200 }}>
                 {["👍","👏","❤️","😂","😮","🎉","🙌","🔥","💯","👋"].map(e => (
@@ -362,21 +349,19 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           {audioTracks.map(t => <AudioTrack key={t.participant.identity} trackRef={t} />)}
         </div>
 
-        {/* ── PANEL CHAT ── */}
-        {panel === "chat" && (
-          <div style={{ width: 300, flexShrink: 0, background: "#161b22", borderLeft: "1px solid #21262d", display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #21262d", flexShrink: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "#e6edf3" }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b949e" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                Chat en direct
-              </div>
-              <button onClick={() => setPanel(null)} style={{ width: 28, height: 28, background: "none", border: "none", color: "#8b949e", cursor: "pointer", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
+        {/* ── PANEL CHAT — toujours monté, caché via display ── */}
+        <div style={{ width: 300, flexShrink: 0, background: "#161b22", borderLeft: "1px solid #21262d", display: panel === "chat" ? "flex" : "none", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #21262d", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "#e6edf3" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b949e" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              Chat en direct
             </div>
-            <Chat />
+            <button onClick={() => setPanel(null)} style={{ width: 28, height: 28, background: "none", border: "none", color: "#8b949e", cursor: "pointer", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
-        )}
+          <Chat />
+        </div>
       </div>
 
       {/* ── CONTROLS ── */}
