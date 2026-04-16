@@ -16,6 +16,7 @@ const recordingSelect = {
     publishable: true,
     createdAt: true,
     size: false,
+    status: true,
   },
 }
 

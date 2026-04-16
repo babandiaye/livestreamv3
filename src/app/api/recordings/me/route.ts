@@ -58,6 +58,7 @@ export async function GET() {
       duration: r.duration,
       size: r.size ? Number(r.size) : null,
       egressId: r.egressId,
+      status: r.status,
       createdAt: r.createdAt.toISOString(),
       session: r.session,
     })),
