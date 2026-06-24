@@ -7,10 +7,11 @@ const globalForPrisma = globalThis as unknown as {
 }
 
 function createPrismaClient() {
-  const pool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL ??
-      'postgresql://livekit:LivekitUnchk2026!@127.0.0.1:5432/livestreamv2',
-  })
+  const connectionString = process.env.DATABASE_URL
+  if (!connectionString) {
+    throw new Error("DATABASE_URL n'est pas défini dans l'environnement")
+  }
+  const pool = new pg.Pool({ connectionString })
   const adapter = new PrismaPg(pool as any)
   return new PrismaClient({ adapter } as any)
 }

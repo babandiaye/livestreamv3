@@ -117,13 +117,20 @@ export default function AdminClient({
 
   const changeRole = async (userId: string, role: string) => {
     setUpdatingRole(userId)
-    await fetch(`/api/admin/users/${userId}/role`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role }),
-    })
-    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, role: role as Role } : u))
-    setUpdatingRole(null)
+    try {
+      const res = await fetch(`/api/admin/users`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, role }),
+      })
+      if (!res.ok) {
+        alert("Échec du changement de rôle : " + (await res.text()))
+        return
+      }
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, role: role as Role } : u))
+    } finally {
+      setUpdatingRole(null)
+    }
   }
 
   const deleteRoom = async (id: string) => {
