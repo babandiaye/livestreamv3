@@ -43,6 +43,7 @@ export type CreateIngressParams = {
   room_name?: string;
   ingress_type?: string;
   metadata: RoomMetadata;
+  create_room?: boolean; // false = la salle existe déjà (ingress vers un salon ouvert)
 };
 
 export type CreateIngressResponse = {
@@ -189,13 +190,16 @@ export class Controller {
     metadata,
     room_name,
     ingress_type = "rtmp",
+    create_room = true,
   }: CreateIngressParams): Promise<CreateIngressResponse> {
     if (!room_name) room_name = generateRoomId();
 
-    await this.roomService.createRoom({
-      name: room_name,
-      metadata: JSON.stringify(metadata),
-    });
+    if (create_room) {
+      await this.roomService.createRoom({
+        name: room_name,
+        metadata: JSON.stringify(metadata),
+      });
+    }
 
     const options: CreateIngressOptions = {
       name: room_name,

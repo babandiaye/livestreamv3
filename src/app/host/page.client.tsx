@@ -60,6 +60,13 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [floatingEmojis, setFloatingEmojis] = useState<{id:number;emoji:string;x:number}[]>([]);
 
+  // Diffusion OBS (ingress RTMP/WHIP) vers le salon courant
+  const [showObs, setShowObs] = useState(false);
+  const [obsType, setObsType] = useState<"rtmp" | "whip">("rtmp");
+  const [obsLoading, setObsLoading] = useState(false);
+  const [obsResult, setObsResult] = useState<{ type: string; url: string; streamKey: string } | null>(null);
+  const [obsCopied, setObsCopied] = useState<string | null>(null);
+
   // Timer d'enregistrement — synchronisé avec le début réel de la capture egress
   useEffect(() => {
     if (!recording || !recordingStartTime) {
@@ -315,6 +322,30 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
 
   const copyLink = () => {
     navigator.clipboard.writeText(`${process.env.NEXT_PUBLIC_SITE_URL}/watch/${room.name}`);
+  };
+
+  const obsCopy = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setObsCopied(key);
+    setTimeout(() => setObsCopied(null), 2000);
+  };
+
+  const createIngress = async (type: "rtmp" | "whip") => {
+    setObsLoading(true);
+    try {
+      const res = await fetch("/api/create_ingress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ ingress_type: type }),
+      });
+      if (!res.ok) { alert("Erreur OBS : " + (await res.text())); return; }
+      const data = await res.json();
+      setObsResult({ type, url: data.ingress?.url ?? "", streamKey: data.ingress?.streamKey ?? "" });
+    } catch {
+      alert("Erreur réseau OBS");
+    } finally {
+      setObsLoading(false);
+    }
   };
 
   const screenTrack = tracks.find(t => t.source === Track.Source.ScreenShare);
@@ -643,6 +674,13 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           </div>
 
           <div className="h-ctrl-btn-wrap">
+            <button className={`h-ctrl-btn${showObs ? " active" : ""}`} onClick={() => { setObsResult(null); setShowObs(true); }} title="Diffuser via OBS (RTMP/WHIP)">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="M17 10l5-3v10l-5-3"/></svg>
+            </button>
+            <span className="h-ctrl-label">OBS</span>
+          </div>
+
+          <div className="h-ctrl-btn-wrap">
             <button className="h-ctrl-btn quit" onClick={stopStream}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.61 21 3 13.39 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.46.57 3.58a1 1 0 0 1-.25 1.01l-2.2 2.2z" transform="rotate(135 12 12)"/></svg>
             </button>
@@ -687,6 +725,57 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           streamingEgressId={streamingEgressId}
           onClose={() => setShowStreamingDialog(false)}
         />
+      )}
+
+      {showObs && (
+        <div className="h-obs-overlay" onClick={(e) => e.target === e.currentTarget && setShowObs(false)}>
+          <div className="h-obs-modal">
+            <div className="h-obs-hdr">
+              <span>📡 Diffuser via OBS — {decodeURIComponent(room.name)}</span>
+              <button className="h-obs-close" onClick={() => setShowObs(false)}>✕</button>
+            </div>
+
+            {!obsResult ? (
+              <div className="h-obs-body">
+                <p className="h-obs-desc">Choisissez le protocole d&apos;entrée, puis configurez OBS avec les identifiants générés. Le flux apparaîtra dans ce salon.</p>
+                <div className="h-obs-types">
+                  <button className={`h-obs-type${obsType === "rtmp" ? " active" : ""}`} onClick={() => setObsType("rtmp")}>
+                    <strong>RTMP</strong><small>OBS Studio classique</small>
+                  </button>
+                  <button className={`h-obs-type${obsType === "whip" ? " active" : ""}`} onClick={() => setObsType("whip")}>
+                    <strong>WHIP</strong><small>WebRTC faible latence</small>
+                  </button>
+                </div>
+                <button className="h-obs-generate" onClick={() => createIngress(obsType)} disabled={obsLoading}>
+                  {obsLoading ? "Génération…" : "Générer les identifiants"}
+                </button>
+              </div>
+            ) : (
+              <div className="h-obs-body">
+                <div className="h-obs-field">
+                  <label>{obsResult.type === "whip" ? "URL WHIP" : "Serveur RTMP"}</label>
+                  <div className="h-obs-copyrow">
+                    <input readOnly value={obsResult.url} />
+                    <button onClick={() => obsCopy(obsResult.url, "url")}>{obsCopied === "url" ? "✓" : "Copier"}</button>
+                  </div>
+                </div>
+                <div className="h-obs-field">
+                  <label>{obsResult.type === "whip" ? "Bearer Token" : "Clé de flux"}</label>
+                  <div className="h-obs-copyrow">
+                    <input readOnly value={obsResult.streamKey} />
+                    <button onClick={() => obsCopy(obsResult.streamKey, "key")}>{obsCopied === "key" ? "✓" : "Copier"}</button>
+                  </div>
+                </div>
+                <p className="h-obs-hint">
+                  {obsResult.type === "whip"
+                    ? "Dans OBS → Paramètres → Flux : Service « WHIP », collez l'URL et le Bearer Token, puis « Démarrer le streaming »."
+                    : "Dans OBS → Paramètres → Flux : Service « Personnalisé », collez le Serveur et la Clé de flux, puis « Démarrer le streaming »."}
+                </p>
+                <button className="h-obs-generate" onClick={() => setObsResult(null)}>← Changer de protocole</button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       <style>{`
@@ -795,6 +884,27 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-emoji-picker{position:absolute;bottom:96px;left:50%;transform:translateX(-50%);background:#111827;border:1px solid #1e2d3d;border-radius:14px;padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:300px;box-shadow:0 8px 32px rgba(0,0,0,.6);z-index:200;}
         .h-emoji-btn{width:44px;height:44px;background:none;border:none;font-size:1.6rem;cursor:pointer;border-radius:10px;transition:background .15s;}
         .h-emoji-btn:hover{background:#1e2d3d;}
+        .h-obs-overlay{position:fixed;inset:0;background:rgba(7,13,20,.7);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:300;}
+        .h-obs-modal{width:100%;max-width:480px;background:#111827;border:1px solid #1e2d3d;border-radius:16px;box-shadow:0 12px 48px rgba(0,0,0,.6);overflow:hidden;}
+        .h-obs-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #1e2d3d;font-weight:700;color:#e2e8f0;font-size:0.95rem;}
+        .h-obs-close{width:28px;height:28px;background:none;border:none;color:#64748b;cursor:pointer;border-radius:6px;font-size:1rem;}
+        .h-obs-close:hover{background:#1e2d3d;color:#e2e8f0;}
+        .h-obs-body{padding:20px;display:flex;flex-direction:column;gap:16px;}
+        .h-obs-desc{font-size:0.84rem;color:#94a3b8;line-height:1.5;}
+        .h-obs-types{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+        .h-obs-type{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:12px 14px;background:#1e2d3d;border:1.5px solid #2d3f52;border-radius:10px;color:#e2e8f0;cursor:pointer;font-family:inherit;text-align:left;transition:border-color .15s,background .15s;}
+        .h-obs-type small{color:#64748b;font-size:0.7rem;}
+        .h-obs-type.active{border-color:#3b82f6;background:rgba(59,130,246,.12);}
+        .h-obs-generate{padding:11px;background:#3b82f6;color:white;border:none;border-radius:9px;font-size:0.9rem;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s;}
+        .h-obs-generate:hover:not(:disabled){background:#2563eb;}
+        .h-obs-generate:disabled{opacity:.6;cursor:not-allowed;}
+        .h-obs-field{display:flex;flex-direction:column;gap:5px;}
+        .h-obs-field label{font-size:0.74rem;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;}
+        .h-obs-copyrow{display:flex;gap:6px;}
+        .h-obs-copyrow input{flex:1;min-width:0;padding:9px 12px;background:#0d1117;border:1px solid #2d3f52;border-radius:8px;color:#e2e8f0;font-family:ui-monospace,monospace;font-size:0.8rem;}
+        .h-obs-copyrow button{padding:9px 14px;background:#1e2d3d;border:1px solid #2d3f52;border-radius:8px;color:#e2e8f0;cursor:pointer;font-family:inherit;font-size:0.8rem;font-weight:600;white-space:nowrap;}
+        .h-obs-copyrow button:hover{background:#243447;}
+        .h-obs-hint{font-size:0.78rem;color:#64748b;line-height:1.5;background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.18);border-radius:8px;padding:10px 12px;}
       `}</style>
     </div>
   );
