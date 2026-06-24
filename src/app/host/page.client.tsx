@@ -327,6 +327,13 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
 
   const mainContent = showWhiteboard ? "whiteboard" : screenTrack ? "screen" : ingressCamTrack ? "ingress" : localCamTrack ? "cam" : "avatar";
 
+  // Tri de la liste : les demandes de prise de parole (main levée, pas encore sur scène) remontent en tête
+  const handRaisedRank = (p: Participant) => {
+    const m = getMeta(p);
+    return m.hand_raised && !m.invited_to_stage ? 1 : 0;
+  };
+  const sortedParticipants = [...participants].sort((a, b) => handRaisedRank(b) - handRaisedRank(a));
+
   return (
     <div className="h-root">
 
@@ -492,21 +499,13 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           {stageAudioTracks.map(t => <AudioTrack key={t.participant.identity} trackRef={t} />)}
 
           {raisedHands.length > 0 && (
-            <div className="h-hands">
-              {raisedHands.map(id => {
-                const p = participants.find(p => p.identity === id);
-                const displayName = p?.name ?? id;
-                return (
-                  <div key={id} className="h-hand-chip">
-                    <span>🙋 {displayName}</span>
-                    <button className="h-hand-ok" onClick={() => inviteToStage(id)} disabled={inviting === id}>
-                      {inviting === id ? "..." : "Accepter"}
-                    </button>
-                    <button className="h-hand-no" onClick={() => removeFromStage(id)}>✕</button>
-                  </div>
-                );
-              })}
-            </div>
+            <button
+              className="h-hands-notif"
+              onClick={() => setPanel("participants")}
+              title="Voir les demandes dans la liste des participants"
+            >
+              {raisedHands.length} demande{raisedHands.length > 1 ? "s" : ""} de prise de parole
+            </button>
           )}
 
           <StartAudio label="Cliquez pour activer le son" className="h-start-audio" />
@@ -539,24 +538,36 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
 
             {panel === "participants" && (
               <div className="h-plist">
-                <div className="h-plist-count">{participants.length} PARTICIPANT{participants.length > 1 ? "S" : ""}</div>
-                {participants.map(p => {
+                <div className="h-plist-count">
+                  {participants.length} PARTICIPANT{participants.length > 1 ? "S" : ""}
+                  {raisedHands.length > 0 && (
+                    <span className="h-plist-hands"> · {raisedHands.length} main{raisedHands.length > 1 ? "s" : ""} levée{raisedHands.length > 1 ? "s" : ""}</span>
+                  )}
+                </div>
+                {sortedParticipants.map(p => {
                   const meta = getMeta(p);
                   const isHost = p.identity === localParticipant.identity;
+                  const handRaised = meta.hand_raised && !meta.invited_to_stage;
                   return (
-                    <div key={p.identity} className="h-prow">
+                    <div key={p.identity} className={`h-prow${handRaised ? " raised" : ""}`}>
                       <div className="h-pavatar">{(p.name || p.identity).charAt(0).toUpperCase()}</div>
                       <div className="h-pinfo">
                         <div className="h-pname">
                           {p.name || p.identity}
+                          {handRaised && <span className="h-hand-icon" title="Demande de prise de parole">✋</span>}
+                          {meta.invited_to_stage && <span className="h-stage-icon" title="Sur scène">🎤</span>}
                           {isHost && <span className="h-ptag">Vous</span>}
                         </div>
-                        <div className="h-pstatus">
-                          {meta.hand_raised && !meta.invited_to_stage && <span className="h-phand">🙋 Main levée</span>}
-                          {meta.invited_to_stage && <span className="h-pstage">🎤 Sur scène</span>}
-                        </div>
                       </div>
-                      {!isHost && !meta.invited_to_stage && (
+                      {!isHost && handRaised && (
+                        <>
+                          <button className="h-paccept" onClick={() => inviteToStage(p.identity)} disabled={inviting === p.identity}>
+                            {inviting === p.identity ? "..." : "Accepter"}
+                          </button>
+                          <button className="h-pdecline" onClick={() => removeFromStage(p.identity)} title="Refuser la demande">✕</button>
+                        </>
+                      )}
+                      {!isHost && !meta.invited_to_stage && !handRaised && (
                         <button className="h-pinvite" onClick={() => inviteToStage(p.identity)} disabled={inviting === p.identity}>
                           {inviting === p.identity ? "..." : "Inviter"}
                         </button>
@@ -724,11 +735,8 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-avatar-sm{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#1d4ed8);display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;color:white;}
         .h-tile-name{position:absolute;bottom:4px;left:6px;font-size:0.68rem;color:#94a3b8;background:rgba(13,17,23,.8);padding:2px 6px;border-radius:3px;}
         .h-tile-rm{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:rgba(239,68,68,.8);border:none;color:white;font-size:0.65rem;cursor:pointer;}
-        .h-hands{position:absolute;top:12px;left:12px;display:flex;flex-direction:column;gap:8px;z-index:10;max-width:280px;}
-        .h-hand-chip{display:flex;align-items:center;gap:8px;background:rgba(13,17,23,.92);border:1px solid rgba(251,191,36,.4);border-radius:8px;padding:8px 12px;font-size:0.8rem;backdrop-filter:blur(8px);}
-        .h-hand-chip span{flex:1;color:#fbbf24;font-weight:500;}
-        .h-hand-ok{padding:4px 10px;background:#22c55e;color:white;border:none;border-radius:5px;font-size:0.75rem;cursor:pointer;font-family:inherit;}
-        .h-hand-no{width:20px;height:20px;background:#ef4444;color:white;border:none;border-radius:50%;font-size:0.65rem;cursor:pointer;}
+        .h-hands-notif{position:absolute;top:12px;left:12px;z-index:10;display:flex;align-items:center;background:rgba(13,17,23,.92);border:1px solid rgba(251,191,36,.5);border-radius:8px;padding:9px 14px;font-size:0.82rem;color:#fbbf24;font-weight:600;cursor:pointer;backdrop-filter:blur(8px);font-family:inherit;transition:background .15s;}
+        .h-hands-notif:hover{background:rgba(251,191,36,.15);}
         .h-start-audio{position:absolute;inset:0;background:rgba(7,13,20,.85);color:white;border:none;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);}
         .h-floating-emoji{position:absolute;bottom:10%;font-size:3rem;z-index:50;pointer-events:none;animation:floatUp 3s ease-out forwards;}
         @keyframes floatUp{0%{opacity:1;transform:translateY(0) scale(1)}50%{opacity:1;transform:translateY(-40vh) scale(1.3)}100%{opacity:0;transform:translateY(-80vh) scale(0.8)}}
@@ -749,8 +757,8 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-pinfo{flex:1;min-width:0;}
         .h-pname{font-size:0.85rem;font-weight:500;display:flex;align-items:center;gap:6px;color:#e2e8f0;}
         .h-ptag{font-size:0.65rem;background:rgba(59,130,246,.2);color:#60a5fa;padding:1px 6px;border-radius:4px;font-weight:600;}
-        .h-pstatus{font-size:0.72rem;color:#64748b;margin-top:2px;}
-        .h-phand{color:#fbbf24;} .h-pstage{color:#22c55e;}
+        .h-hand-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(251,191,36,.22);font-size:0.7rem;line-height:1;flex-shrink:0;}
+        .h-stage-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(34,197,94,.2);font-size:0.7rem;line-height:1;flex-shrink:0;}
         .h-pinvite{padding:4px 10px;background:rgba(59,130,246,.12);color:#60a5fa;border:1px solid rgba(59,130,246,.3);border-radius:5px;font-size:0.72rem;cursor:pointer;font-family:inherit;transition:background .15s;}
         .h-pinvite:hover:not(:disabled){background:#3b82f6;color:white;border-color:#3b82f6;}
         .h-pinvite:disabled{opacity:.4;cursor:not-allowed;}
@@ -758,6 +766,13 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-premove:hover{background:#ef4444;color:white;border-color:#ef4444;}
         .h-pkick{padding:4px 10px;background:rgba(239,68,68,.18);color:#f87171;border:1px solid rgba(239,68,68,.4);border-radius:5px;font-size:0.72rem;cursor:pointer;font-family:inherit;transition:background .15s;margin-left:2px;}
         .h-pkick:hover{background:#ef4444;color:white;border-color:#ef4444;}
+        .h-plist-hands{color:#fbbf24;font-weight:700;}
+        .h-prow.raised{background:rgba(251,191,36,.08);box-shadow:inset 0 0 0 1px rgba(251,191,36,.25);}
+        .h-paccept{padding:4px 10px;background:#22c55e;color:white;border:none;border-radius:5px;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s;}
+        .h-paccept:hover:not(:disabled){background:#16a34a;}
+        .h-paccept:disabled{opacity:.5;cursor:not-allowed;}
+        .h-pdecline{width:26px;height:26px;background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.3);border-radius:5px;font-size:0.7rem;cursor:pointer;font-family:inherit;transition:background .15s;}
+        .h-pdecline:hover{background:#ef4444;color:white;border-color:#ef4444;}
         .h-controls{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 24px;background:#0d1117;border-top:1px solid #1e2d3d;flex-shrink:0;height:88px;}
         .h-ctrl-left{display:flex;align-items:center;}
         .h-room-info{display:flex;align-items:center;gap:6px;font-size:0.78rem;color:#64748b;}
