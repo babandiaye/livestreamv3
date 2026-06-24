@@ -13,6 +13,7 @@ import {
   RoomServiceClient,
   TrackSource,
 } from "livekit-server-sdk";
+import { jwtVerify } from "jose";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,15 +97,27 @@ export async function getSessionFromReq(req: Request): Promise<Session> {
   const token = authHeader?.split(" ")[1];
   if (!token) throw new Error("No authorization header found");
 
-  const parts = token.split(".");
-  if (parts.length !== 3) throw new Error("Invalid token format");
+  // C1 — Vérifie la SIGNATURE du JWT LiveKit (HS256 avec LIVEKIT_API_SECRET),
+  // l'émetteur (iss = LIVEKIT_API_KEY) et l'expiration. Sans cette vérification,
+  // n'importe quel token forgé serait accepté.
+  const secret = new TextEncoder().encode(process.env.LIVEKIT_API_SECRET!);
+  let payload: Record<string, unknown>;
+  try {
+    const result = await jwtVerify(token, secret, {
+      algorithms: ["HS256"],
+      issuer: process.env.LIVEKIT_API_KEY!,
+    });
+    payload = result.payload as Record<string, unknown>;
+  } catch {
+    throw new Error("Invalid or expired token");
+  }
 
-  const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
-  if (!payload.sub || !payload.video?.room) throw new Error("Invalid token payload");
+  const video = payload.video as { room?: string } | undefined;
+  if (!payload.sub || !video?.room) throw new Error("Invalid token payload");
 
   return {
-    identity: payload.sub,
-    room_name: payload.video.room,
+    identity: payload.sub as string,
+    room_name: video.room,
   };
 }
 
