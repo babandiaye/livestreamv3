@@ -18,22 +18,28 @@ export async function POST(req: NextRequest) {
   if (!room)
     return NextResponse.json({ error: "Salle introuvable" }, { status: 404 })
 
-  const user = await prisma.user.findUnique({ where: { email: userEmail } })
+  // C3/M1 — auto-provision : les étudiants viennent du cours Moodle (déjà enrôlés côté LMS).
+  // On crée l'utilisateur s'il n'existe pas, puis on l'inscrit à la session (idempotent).
+  const user = await prisma.user.upsert({
+    where: { email: userEmail },
+    update: {},
+    create: {
+      keycloakId: `moodle:${userEmail}`,
+      email: userEmail,
+      name: userName,
+      role: "VIEWER",
+    },
+  })
 
-  if (user) {
-    const enrollment = await prisma.enrollment.findUnique({
-      where: { userId_sessionId: { userId: user.id, sessionId: roomId } },
-    })
-    if (!enrollment) {
-      await prisma.enrollment.create({
-        data: {
-          userId: user.id,
-          sessionId: roomId,
-          createdBy: "moodle-auto",
-        },
-      })
-    }
-  }
+  await prisma.enrollment.upsert({
+    where: { userId_sessionId: { userId: user.id, sessionId: roomId } },
+    update: {},
+    create: {
+      userId: user.id,
+      sessionId: roomId,
+      createdBy: "moodle-auto",
+    },
+  })
 
   const at = new AccessToken(
     process.env.LIVEKIT_API_KEY!,

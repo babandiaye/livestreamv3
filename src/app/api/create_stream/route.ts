@@ -5,6 +5,9 @@ export async function POST(req: Request) {
   if (process.env.KEYCLOAK_ENABLED === "true") {
     const session = await auth();
     if (!session) return new Response("Non authentifié", { status: 401 });
+    // C3 — seuls ADMIN/MODERATOR peuvent ouvrir un salon ; un VIEWER ne peut que rejoindre.
+    if (session.user.role !== "ADMIN" && session.user.role !== "MODERATOR")
+      return new Response("Seuls les animateurs peuvent créer un salon", { status: 403 });
   }
   const controller = new Controller();
   try {
