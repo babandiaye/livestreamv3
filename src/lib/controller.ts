@@ -121,6 +121,34 @@ export async function getSessionFromReq(req: Request): Promise<Session> {
   };
 }
 
+// ─── Autorisation créateur (C2) ─────────────────────────────────────────────────
+
+// Vérifie que l'appelant est le créateur de la salle (creator_identity dans les
+// métadonnées). Lève "FORBIDDEN" sinon. À appeler après getSessionFromReq sur les
+// actions réservées à l'animateur (kick, enregistrement, diffusion).
+export async function assertRoomCreator(session: Session): Promise<void> {
+  const httpUrl = process.env.LIVEKIT_WS_URL!
+    .replace("wss://", "https://")
+    .replace("ws://", "http://");
+  const roomService = new RoomServiceClient(
+    httpUrl,
+    process.env.LIVEKIT_API_KEY!,
+    process.env.LIVEKIT_API_SECRET!
+  );
+  const rooms = await roomService.listRooms([session.room_name]);
+  if (rooms.length === 0) throw new Error("Room does not exist");
+
+  let creator_identity: string | undefined;
+  try {
+    creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
+  } catch {
+    creator_identity = undefined;
+  }
+  if (!creator_identity || creator_identity !== session.identity) {
+    throw new Error("FORBIDDEN");
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function defaultPermission(): ParticipantPermission {

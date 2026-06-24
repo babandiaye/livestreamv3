@@ -1,5 +1,5 @@
 import { EgressClient, StreamOutput, StreamProtocol, EncodingOptionsPreset } from "livekit-server-sdk";
-import { getSessionFromReq } from "@/lib/controller";
+import { getSessionFromReq, assertRoomCreator } from "@/lib/controller";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
@@ -14,6 +14,7 @@ export async function POST(req: Request) {
     );
 
     const session = await getSessionFromReq(req);
+    await assertRoomCreator(session); // C2 — seul l'animateur peut diffuser
     const { destinations } = await req.json() as {
       destinations: { url: string; key: string }[];
     };
@@ -43,6 +44,8 @@ export async function POST(req: Request) {
 
     return Response.json({ egress_id: info.egressId });
   } catch (err) {
+    if (err instanceof Error && err.message === "FORBIDDEN")
+      return new Response("Seul l'animateur peut effectuer cette action", { status: 403 });
     console.error("start-streaming error:", err);
     return new Response(err instanceof Error ? err.message : "Error", { status: 500 });
   }

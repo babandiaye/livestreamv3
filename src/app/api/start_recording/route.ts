@@ -1,5 +1,5 @@
 import { EgressClient, EncodedFileOutput, EncodedFileType, S3Upload, EncodingOptions } from "livekit-server-sdk"
-import { getSessionFromReq } from "@/lib/controller"
+import { getSessionFromReq, assertRoomCreator } from "@/lib/controller"
 
 const egressClient = new EgressClient(
   process.env.LIVEKIT_WS_URL!.replace("wss://", "https://").replace("ws://", "http://"),
@@ -10,6 +10,7 @@ const egressClient = new EgressClient(
 export async function POST(req: Request) {
   try {
     const session = await getSessionFromReq(req)
+    await assertRoomCreator(session) // C2 — seul l'animateur peut enregistrer
     const s3 = new S3Upload({
       accessKey: process.env.S3_ACCESS_KEY!,
       secret: process.env.S3_SECRET!,
@@ -47,6 +48,8 @@ export async function POST(req: Request) {
     console.log("[start_recording] web egress started:", info.egressId, "url:", layoutUrl)
     return Response.json({ egress_id: info.egressId })
   } catch (err) {
+    if (err instanceof Error && err.message === "FORBIDDEN")
+      return new Response("Seul l'animateur peut effectuer cette action", { status: 403 })
     console.error("start_recording error:", err)
     return new Response(err instanceof Error ? err.message : "Error", { status: 500 })
   }
