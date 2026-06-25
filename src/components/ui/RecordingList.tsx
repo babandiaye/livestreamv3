@@ -20,9 +20,43 @@ export default function RecordingList({
 }: RecordingListProps) {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [playing, setPlaying] = useState<Recording | null>(null)
+  const [playUrl, setPlayUrl] = useState<string | null>(null)
+  const [resolving, setResolving] = useState<string | null>(null)
 
-  const proxyUrl = (rec: Recording) =>
-    `/api/download-recording?key=${encodeURIComponent(rec.s3Key)}`
+  // Récupère un lien de proxy signé via la route authentifiée (auth + autorisation).
+  // Plus aucune clé S3 brute n'est exposée côté client.
+  const resolveUrl = async (id: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/recordings/${id}/url`)
+      if (!res.ok) return null
+      const { url } = await res.json()
+      return url as string
+    } catch {
+      return null
+    }
+  }
+
+  const openPlayer = async (rec: Recording) => {
+    setPlaying(rec)
+    setPlayUrl(null)
+    setPlayUrl(await resolveUrl(rec.id))
+  }
+
+  const handleDownload = async (rec: Recording) => {
+    setResolving(rec.id)
+    try {
+      const url = await resolveUrl(rec.id)
+      if (!url) { alert("Lien indisponible"); return }
+      const a = document.createElement("a")
+      a.href = url
+      a.download = rec.filename || "enregistrement.mp4"
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } finally {
+      setResolving(null)
+    }
+  }
 
   const handleDelete = async (rec: Recording) => {
     if (!confirm(`Supprimer « ${rec.filename} » ?`)) return
@@ -48,7 +82,7 @@ export default function RecordingList({
       {/* ── MODAL LECTEUR ── */}
       {playing && (
         <div
-          onClick={() => setPlaying(null)}
+          onClick={() => { setPlaying(null); setPlayUrl(null) }}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 1000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}
         >
           <div
@@ -60,27 +94,33 @@ export default function RecordingList({
                 🎬 {playing.filename}
               </span>
               <div style={{ display: "flex", gap: 8, flexShrink: 0, marginLeft: 12 }}>
-                <a
-                  href={proxyUrl(playing)}
-                  download={playing.filename}
-                  style={{ padding: "4px 12px", background: "#2d3748", color: "#e2e8f0", borderRadius: 6, fontSize: 12, textDecoration: "none", fontWeight: 500 }}
+                <button
+                  onClick={() => handleDownload(playing)}
+                  disabled={resolving === playing.id}
+                  style={{ padding: "4px 12px", background: "#2d3748", color: "#e2e8f0", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "none", fontFamily: "inherit", fontWeight: 500 }}
                 >
                   ⬇ Télécharger
-                </a>
+                </button>
                 <button
-                  onClick={() => setPlaying(null)}
+                  onClick={() => { setPlaying(null); setPlayUrl(null) }}
                   style={{ padding: "4px 12px", background: "#dc2626", color: "white", border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}
                 >
                   ✕ Fermer
                 </button>
               </div>
             </div>
-            <video
-              src={proxyUrl(playing)}
-              controls
-              autoPlay
-              style={{ width: "100%", maxHeight: "70vh", background: "black", display: "block" }}
-            />
+            {playUrl ? (
+              <video
+                src={playUrl}
+                controls
+                autoPlay
+                style={{ width: "100%", maxHeight: "70vh", background: "black", display: "block" }}
+              />
+            ) : (
+              <div style={{ width: "100%", height: 360, background: "black", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 14 }}>
+                Chargement…
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -127,16 +167,16 @@ export default function RecordingList({
               <RecordingBadge status={rec.status} />
               {rec.status === "READY" && (
                 <>
-                  <button onClick={() => setPlaying(rec)} style={btn("#0065b1", "white")}>
+                  <button onClick={() => openPlayer(rec)} style={btn("#0065b1", "white")}>
                     ▶ Voir
                   </button>
-                  <a
-                    href={proxyUrl(rec)}
-                    download={rec.filename}
-                    style={{ ...btn("#f3f4f6", "#374151"), textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                  <button
+                    onClick={() => handleDownload(rec)}
+                    disabled={resolving === rec.id}
+                    style={btn("#f3f4f6", "#374151")}
                   >
-                    ⬇ Télécharger
-                  </a>
+                    {resolving === rec.id ? "…" : "⬇ Télécharger"}
+                  </button>
                 </>
               )}
               {canDelete && (

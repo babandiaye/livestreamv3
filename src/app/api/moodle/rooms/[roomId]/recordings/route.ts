@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { validateMoodleKey } from "@/lib/moodle-auth"
 import { prisma } from "@/lib/prisma"
+import { signDownloadPath } from "@/lib/download-token"
 
 export const dynamic = "force-dynamic"
 
@@ -31,7 +32,8 @@ export async function GET(
       duration: r.duration ?? 0,
       size: r.size ? Number(r.size) : 0,
       date: r.createdAt.toISOString(),
-      playUrl: `${base}/api/download-recording?key=${encodeURIComponent(r.s3Key)}`,
+      // Lien de lecture signé et expirant (24 h) — plus de clé S3 brute exposée.
+      playUrl: r.s3Key ? `${base}${signDownloadPath(r.s3Key, 86400)}` : null,
       deleteUrl: `${base}/api/moodle/recordings/${r.id}`,
     })),
   })

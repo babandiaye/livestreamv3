@@ -1,7 +1,6 @@
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import { signDownloadPath } from "@/lib/download-token"
 import { NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
@@ -13,28 +12,29 @@ export async function GET(
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 })
 
+  const user = await prisma.user.findUnique({ where: { id: session.user.id } })
+  if (!user) return NextResponse.json({ error: "Utilisateur non trouvé" }, { status: 404 })
+
   const { id } = await params
-  const recording = await prisma.recording.findUnique({ where: { id } })
+  const recording = await prisma.recording.findUnique({
+    where: { id },
+    include: { session: { select: { creatorId: true } } },
+  })
   if (!recording) return NextResponse.json({ error: "Introuvable" }, { status: 404 })
   if (!recording.s3Key || !recording.s3Bucket) {
     return NextResponse.json({ error: "Fichier non disponible" }, { status: 404 })
   }
 
-  const s3 = new S3Client({
-    region: process.env.S3_REGION || "us-east-1",
-    endpoint: process.env.S3_ENDPOINT,
-    credentials: {
-      accessKeyId: process.env.S3_ACCESS_KEY!,
-      secretAccessKey: process.env.S3_SECRET!,
-    },
-    forcePathStyle: true,
-  })
+  // Autorisation : ADMIN, créateur de la session, ou utilisateur enrôlé.
+  let allowed = user.role === "ADMIN" || recording.session.creatorId === user.id
+  if (!allowed) {
+    const enrollment = await prisma.enrollment.findUnique({
+      where: { userId_sessionId: { userId: user.id, sessionId: recording.sessionId } },
+    })
+    allowed = !!enrollment
+  }
+  if (!allowed) return NextResponse.json({ error: "Accès refusé" }, { status: 403 })
 
-  const command = new GetObjectCommand({
-    Bucket: recording.s3Bucket,
-    Key: recording.s3Key,
-  })
-
-  const url = await getSignedUrl(s3, command, { expiresIn: 3600 })
-  return NextResponse.json({ url })
+  // Lien de proxy signé (MinIO non exposé publiquement) — expirant.
+  return NextResponse.json({ url: signDownloadPath(recording.s3Key) })
 }

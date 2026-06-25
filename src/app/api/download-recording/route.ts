@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { verifyDownload } from '@/lib/download-token';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,16 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
+    const exp = searchParams.get('exp');
+    const sig = searchParams.get('sig');
     if (!key) return NextResponse.json({ error: 'key requis' }, { status: 400 });
+
+    // Accès uniquement via un lien signé et non expiré (généré côté serveur par
+    // /api/recordings/[id]/url ou les routes Moodle). Empêche le téléchargement
+    // d'un enregistrement par simple connaissance/devinette de la clé S3.
+    if (!verifyDownload(key, exp, sig)) {
+      return NextResponse.json({ error: 'Lien invalide ou expiré' }, { status: 403 });
+    }
 
     const s3 = getS3Client();
     const bucket = process.env.S3_BUCKET!;
