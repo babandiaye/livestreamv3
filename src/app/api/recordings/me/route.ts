@@ -1,5 +1,6 @@
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { reconcileRecording } from "@/lib/egress"
 import { NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
@@ -49,6 +50,15 @@ export async function GET() {
     },
   })
 
+  // #2 — Auto-réparation paresseuse : réconcilier les enregistrements bloqués en
+  // PROCESSING depuis plus de 90 s avant de répondre.
+  const statusById = new Map<string, string>()
+  await Promise.all(
+    recordings
+      .filter(r => r.status === "PROCESSING" && r.egressId && Date.now() - r.createdAt.getTime() > 90_000)
+      .map(async r => { statusById.set(r.id, await reconcileRecording(r)) })
+  )
+
   return NextResponse.json({
     recordings: recordings.map(r => ({
       id: r.id,
@@ -58,7 +68,7 @@ export async function GET() {
       duration: r.duration,
       size: r.size ? Number(r.size) : null,
       egressId: r.egressId,
-      status: r.status,
+      status: statusById.get(r.id) ?? r.status,
       createdAt: r.createdAt.toISOString(),
       session: r.session,
     })),

@@ -1,5 +1,6 @@
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { reconcileStuckRecordings } from "@/lib/egress"
 import { NextResponse } from "next/server"
 import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3"
 
@@ -9,6 +10,10 @@ export async function GET() {
   const session = await auth()
   if (!session || session.user.role !== "ADMIN")
     return NextResponse.json({ error: "Non autorisé" }, { status: 403 })
+
+  // #2 — Réconcilier les enregistrements bloqués en PROCESSING avant d'afficher
+  // la liste (filet de sécurité si un webhook egress_ended a été manqué).
+  await reconcileStuckRecordings().catch(() => {})
 
   const recordings = await prisma.recording.findMany({
     orderBy: { createdAt: "desc" },

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma"
 import { getSessionFromReq } from "@/lib/controller"
+import { reconcileRecording } from "@/lib/egress"
 import { NextRequest, NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
@@ -32,5 +33,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 })
   }
 
-  return NextResponse.json({ status: recording.status })
+  // #2 — Auto-réparation : si l'enregistrement traîne en PROCESSING depuis plus
+  // d'une minute (webhook egress_ended jamais reçu ?), on interroge LiveKit pour
+  // réconcilier l'état réel. On ne le fait pas pendant la première minute pour ne
+  // pas surcharger l'API durant la confirmation normale du démarrage.
+  let status = recording.status
+  const ageMs = Date.now() - recording.createdAt.getTime()
+  if (status === "PROCESSING" && ageMs > 60_000) {
+    status = (await reconcileRecording(recording)) as typeof status
+  }
+
+  return NextResponse.json({ status })
 }

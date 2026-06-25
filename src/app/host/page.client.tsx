@@ -264,6 +264,33 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     } finally { setRecordingLoading(false); }
   };
 
+  // #3 — Filet de sécurité côté client : si l'animateur ferme l'onglet / quitte la
+  // page alors qu'un egress (enregistrement ou diffusion RTMP) tourne encore, on
+  // tente de l'arrêter en best-effort via une requête « keepalive » (qui survit à
+  // la fermeture de la page). Le webhook room_finished reste le filet principal.
+  useEffect(() => {
+    const handler = () => {
+      try {
+        if (egressId) {
+          fetch("/api/stop_recording", {
+            method: "POST", keepalive: true,
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+            body: JSON.stringify({ egress_id: egressId }),
+          });
+        }
+        if (streamingEgressId) {
+          fetch("/api/stop-streaming", {
+            method: "POST", keepalive: true,
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+            body: JSON.stringify({ egress_id: streamingEgressId }),
+          });
+        }
+      } catch { /* best-effort */ }
+    };
+    window.addEventListener("pagehide", handler);
+    return () => window.removeEventListener("pagehide", handler);
+  }, [egressId, streamingEgressId, authToken]);
+
   // Arrêter le streaming RTMP
   const stopStreaming = async () => {
     if (!streamingEgressId) return;

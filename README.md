@@ -53,9 +53,12 @@ services:
   postgresql:   # PostgreSQL 16
   redis:        # Redis 7 — coordination LiveKit
   livekit:      # LiveKit SFU
-  egress:       # LiveKit Egress — enregistrement
+  egress:       # LiveKit Egress — enregistrement (shm_size: 1gb requis, cf. plus bas)
   ingress:      # LiveKit Ingress — OBS RTMP/WHIP
 ```
+
+> ⚠️ Le service `egress` **doit** déclarer `shm_size: 1gb` (sinon Chrome crashe en
+> enregistrement). Voir « Fiabilité de l'enregistrement (egress) » plus bas.
 
 ### Démarrer la stack
 ```bash
@@ -462,7 +465,7 @@ Bouton "Enregistrer" → /api/start_recording
   → startWebEgress(url=/egress-layout?roomName=xxx)
   → Egress Chrome charge la page
   → /api/egress-token génère un token viewer caché
-  → Enregistrement MP4 1080p 60fps → MinIO S3
+  → Enregistrement MP4 1080p 30fps → MinIO S3
   → Webhook met à jour le statut en base
 ```
 
@@ -471,6 +474,55 @@ Bouton "Enregistrer" → /api/start_recording
 | `PROCESSING` | En cours — badge jaune |
 | `READY` | Disponible — Voir/Télécharger |
 | `FAILED` | Échec Egress — badge rouge |
+
+### ⚙️ Fiabilité de l'enregistrement (egress) — IMPORTANT
+
+Le **web egress** repose sur un Chrome headless et **n'est pas lié au cycle de vie de
+la salle**. Plusieurs garde-fous sont en place ; un réglage d'infra est **obligatoire**.
+
+**1. `/dev/shm` du conteneur egress = 1 Go (OBLIGATOIRE).**
+Le `/dev/shm` par défaut de Docker (64 Mo) est trop petit pour le Chrome de l'egress :
+sous charge réelle (plusieurs caméras + partage d'écran), Chrome **crashe en cours de
+capture** → enregistrement `FAILED` ou tronqué. À régler dans `/opt/livekit/compose.yaml` :
+```yaml
+egress:
+  image: livekit/egress:latest
+  shm_size: 1gb        # ← indispensable
+```
+Puis recréer le conteneur :
+```bash
+cd /opt/livekit
+docker compose up -d egress
+# Vérifier (doit renvoyer 1073741824) :
+docker inspect livekit_egress --format '{{.HostConfig.ShmSize}}'
+```
+
+**2. Enregistrement vs diffusion RTMP.**
+Le webhook ne crée une ligne `Recording` que pour les egress de **type fichier**
+(`isRecordingEgress`). Les diffusions RTMP (`room_composite`/stream) ne génèrent plus
+de faux enregistrement `FAILED`.
+
+**3. Arrêt automatique (anti-fuite).**
+Si l'animateur ferme l'onglet / perd le réseau sans cliquer sur « Stop », l'egress
+serait sinon resté actif indéfiniment. Deux filets :
+- côté serveur : le webhook `room_finished` arrête tout egress encore actif de la salle
+  (retrouvé via la base) — déclenché après `empty_timeout` (300 s, cf. `livekit-server.yaml`) ;
+- côté client : un handler `pagehide` envoie un `stop` *best-effort* (`fetch keepalive`).
+
+**4. Réconciliation des `PROCESSING` bloqués.**
+Si un webhook `egress_ended` est manqué, une ligne peut rester `PROCESSING`. Elle est
+réconciliée automatiquement avec l'état réel de LiveKit (`listEgress`) :
+- à l'affichage des listes (`/api/recordings/me`, `/api/admin/recordings`),
+- lors du polling de statut (`/api/recording-status`, après 60 s).
+
+**5. Dépendance Redis / worker egress.**
+L'egress dépend de **Redis** et d'un worker disponible. S'ils sont indisponibles,
+`/api/start_recording` et `/api/start-streaming` renvoient **503** avec un message clair
+(au lieu d'une 500 opaque). Vérifier la stack :
+```bash
+docker compose -f /opt/livekit/compose.yaml ps        # redis/egress doivent être healthy
+docker logs livekit_egress --tail 50
+```
 
 ---
 

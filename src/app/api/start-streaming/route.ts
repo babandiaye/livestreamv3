@@ -46,7 +46,16 @@ export async function POST(req: Request) {
   } catch (err) {
     if (err instanceof Error && err.message === "FORBIDDEN")
       return new Response("Seul l'animateur peut effectuer cette action", { status: 403 });
+    // #5 — Egress indisponible (Redis down / aucun worker) → 503 explicite.
+    const msg = err instanceof Error ? err.message : "Error";
+    if (/no response|timeout|deadline|unavailable|connection refused/i.test(msg)) {
+      console.error("start-streaming: service egress indisponible:", msg);
+      return new Response(
+        "Le service de diffusion est momentanément indisponible. Réessayez dans quelques instants.",
+        { status: 503 }
+      );
+    }
     console.error("start-streaming error:", err);
-    return new Response(err instanceof Error ? err.message : "Error", { status: 500 });
+    return new Response(msg, { status: 500 });
   }
 }

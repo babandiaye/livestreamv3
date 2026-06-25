@@ -1,5 +1,6 @@
 import { WebhookReceiver } from "livekit-server-sdk"
 import { prisma } from "@/lib/prisma"
+import { egressClient, isRecordingEgress } from "@/lib/egress"
 import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 
@@ -43,10 +44,34 @@ export async function POST(req: NextRequest) {
         data: { status: "ENDED", endedAt: new Date() },
       })
       console.log("[webhook] Session ENDED:", roomName)
+
+      // #3 — Filet de sécurité : arrêter tout enregistrement encore actif pour
+      // cette room. Le web egress n'est PAS lié au cycle de vie de la room ; si
+      // l'animateur a fermé l'onglet / perdu le réseau sans cliquer sur Stop,
+      // le Chrome egress tournerait indéfiniment. On retrouve l'egressId via
+      // notre base (roomName absent côté web egress) et on l'arrête.
+      const endedSession = await prisma.session.findUnique({ where: { roomName } })
+      if (endedSession) {
+        const active = await prisma.recording.findMany({
+          where: { sessionId: endedSession.id, status: "PROCESSING", egressId: { not: null } },
+        })
+        for (const rec of active) {
+          try {
+            await egressClient.stopEgress(rec.egressId!)
+            console.log("[webhook] egress arrêté (room_finished):", rec.egressId)
+          } catch (e) {
+            // Déjà terminé côté LiveKit : la fin sera traitée par egress_ended,
+            // ou restera réconciliable. On ignore l'erreur.
+            console.warn("[webhook] stopEgress (room_finished) ignoré:", rec.egressId, e instanceof Error ? e.message : e)
+          }
+        }
+      }
     }
 
     // ── Egress démarré → Recording PROCESSING ──
-    if (event.event === "egress_started" && event.egressInfo) {
+    // #1 — Uniquement pour les egress d'ENREGISTREMENT (sortie fichier). Les
+    // diffusions RTMP (room_composite/stream) ne doivent pas créer de Recording.
+    if (event.event === "egress_started" && event.egressInfo && isRecordingEgress(event.egressInfo)) {
       const egress = event.egressInfo
 
       let roomName = egress.roomName
@@ -82,7 +107,9 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Egress terminé → Recording READY ou FAILED ──
-    if (event.event === "egress_ended" && event.egressInfo) {
+    // #1 — Idem : on ignore la fin des egress de diffusion RTMP (pas de fichier),
+    // qui sinon seraient marqués FAILED à tort.
+    if (event.event === "egress_ended" && event.egressInfo && isRecordingEgress(event.egressInfo)) {
       const egress = event.egressInfo
 
       let roomName = egress.roomName
