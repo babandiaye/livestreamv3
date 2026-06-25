@@ -41,9 +41,17 @@ export async function GET(req: NextRequest) {
     // 0 = EGRESS_STARTING, 1 = EGRESS_ACTIVE, 2 = EGRESS_ENDING
     // 3 = EGRESS_COMPLETE, 4 = EGRESS_FAILED, 5 = EGRESS_ABORTED, 6 = EGRESS_LIMIT_REACHED
     const statusCode = (target as any).status ?? -1
-    const active = statusCode === 0 || statusCode === 1 || statusCode === 2
+    // « En direct » UNIQUEMENT sur EGRESS_ACTIVE (1). STARTING (0) / ENDING (2)
+    // restent en « vérification » côté UI : un egress qui démarre sans source
+    // vidéo reste en STARTING puis bascule en ABORTED — il ne doit jamais
+    // s'afficher « en direct ».
+    const active = statusCode === 1
     const failed = statusCode === 4 || statusCode === 5 || statusCode === 6
-    const error = (target as any).error ?? ""
+    let error = (target as any).error ?? ""
+    // Message explicite pour le cas « aucune source vidéo ».
+    if (error && /start signal not received/i.test(error)) {
+      error = "Aucune source vidéo détectée : activez la caméra ou le partage d'écran avant de diffuser."
+    }
 
     let statusLabel = "unknown"
     if (statusCode === 0) statusLabel = "starting"

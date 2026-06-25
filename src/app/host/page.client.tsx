@@ -748,6 +748,11 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           onStreamingStop={() => { setStreamingEgressId(null); setStreaming(false); setStreamingFailed(false); }}
           onStreamingFailed={handleStreamingFailed}
           onRecordingStart={startRecording}
+          onValidateSource={() =>
+            localParticipant.isCameraEnabled ||
+            tracks.some(t => t.source === Track.Source.ScreenShare && t.participant.identity === localParticipant.identity) ||
+            showWhiteboard
+          }
           isStreaming={streaming}
           streamingEgressId={streamingEgressId}
           onClose={() => setShowStreamingDialog(false)}

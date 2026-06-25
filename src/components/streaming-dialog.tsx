@@ -8,6 +8,7 @@ interface Props {
   onStreamingStop: () => void;
   onStreamingFailed?: (error: string) => void;
   onRecordingStart?: () => Promise<string | null>;
+  onValidateSource?: () => boolean;
   isStreaming: boolean;
   streamingEgressId: string | null;
   onClose: () => void;
@@ -82,6 +83,7 @@ export default function StreamingDialog({
   onStreamingStop,
   onStreamingFailed,
   onRecordingStart,
+  onValidateSource,
   isStreaming,
   streamingEgressId,
   onClose,
@@ -193,6 +195,15 @@ export default function StreamingDialog({
 
   const handleStart = async () => {
     if (!validate()) return;
+
+    // Une diffusion (room_composite) ne peut pas démarrer sans source vidéo :
+    // sans caméra/partage d'écran/tableau, l'egress s'abandonne ("Start signal
+    // not received"). On bloque ici avec un message clair, AVANT de lancer quoi
+    // que ce soit.
+    if (onValidateSource && !onValidateSource()) {
+      setError("Activez votre caméra, partagez votre écran ou ouvrez le tableau blanc avant de démarrer la diffusion.");
+      return;
+    }
 
     setLoading(true);
     setError("");
