@@ -240,15 +240,100 @@ src/
 
 ---
 
-## Déployer une mise à jour
+## Modèle de branches (Git)
+
+Le dépôt suit un flux à **trois branches** maintenues identiques une fois une version validée :
+
+| Branche | Rôle |
+|---------|------|
+| `dev`  | Branche de **travail** — tous les commits/correctifs y arrivent d'abord |
+| `main` | Branche **stable** (intégration validée) |
+| `prod` | Branche **déployée en production** — référence de ce qui doit tourner en prod |
+
+Cycle : on développe et on teste sur `dev` ; quand tout est validé, on **fast-forward** `dev` vers `main` et `prod` :
+
+```bash
+git push origin dev                                  # 1. travail sauvegardé sur dev
+git branch -f main dev && git push origin main       # 2. main = dev
+git branch -f prod dev && git push origin prod       # 3. prod = dev
+```
+
+> `main` et `prod` doivent **toujours pointer sur le même commit** une fois la synchro faite.
+> Il peut arriver que `prod` soit **en retard** sur `dev` (travail en cours non encore validé) : c'est normal, on ne déploie en production que ce qui est sur `prod`.
+
+---
+
+## Déployer une mise à jour (production)
+
+> ⚠️ On déploie **la branche `prod`** sur le serveur de production. **Toujours sauvegarder la base** avant (voir section suivante), surtout si des migrations sont en attente.
 
 ```bash
 cd /var/www/html/livestreamv3
-git pull origin main
+
+# 1. Récupérer la version de production
+git fetch origin
+git checkout prod
+git reset --hard origin/prod        # aligne exactement le code local sur origin/prod
+
+# 2. Dépendances (si package.json a changé)
 pnpm install
-pnpm prisma migrate deploy
+
+# 3. Migrations de base de données (voir section dédiée ci-dessous)
+pnpm prisma migrate status          # liste les migrations en attente
+pnpm prisma migrate deploy          # applique SANS perte de données
+
+# 4. Build + redémarrage
 pnpm build
 sudo systemctl restart livestream
+sudo systemctl status livestream --no-pager
+```
+
+> **Prérequis `.env`** : `DATABASE_URL` **doit** être défini en production. Depuis la v1.1 il n'y a **plus de chaîne de connexion par défaut codée en dur** — si `DATABASE_URL` est absent, l'application **refuse de démarrer** (erreur explicite). Vérifier aussi `AUTH_SECRET`, les clés `LIVEKIT_*`, `S3_*`, `KEYCLOAK_*`.
+
+---
+
+## Migration de la base de données sans perte de données
+
+La plateforme utilise les **migrations Prisma** (`prisma/migrations/`). En production on applique **uniquement** `migrate deploy`, qui exécute les migrations en attente de façon **additive et non destructive** — il ne réinitialise jamais la base.
+
+### Procédure sûre
+
+```bash
+# 1. SAUVEGARDE COMPLÈTE de la base (impératif avant toute migration)
+mkdir -p /root/backups
+sudo docker exec livekit_postgresql pg_dump -U <user> -d <database> \
+  > /root/backups/livestream_$(date +%F_%H%M).sql
+
+# 2. Voir ce qui sera appliqué (lecture seule, aucune écriture)
+pnpm prisma migrate status
+
+# 3. Appliquer les migrations en attente (non destructif, conserve les données)
+pnpm prisma migrate deploy
+
+# 4. Régénérer le client Prisma, rebuild, redémarrer
+pnpm prisma generate
+pnpm build
+sudo systemctl restart livestream
+```
+
+### Règles d'or
+
+- ✅ **Toujours** `prisma migrate deploy` en production (applique les migrations validées, **conserve les données**).
+- ❌ **Jamais** `prisma migrate reset` ni `prisma migrate dev` en production → ils **suppriment/recréent** des tables (perte de données).
+- ✅ **Toujours** un `pg_dump` **avant** d'appliquer une migration.
+- ⚠️ Les nouvelles migrations se **créent et se testent sur `dev`** (`pnpm prisma migrate dev --name <nom>`), se commitent dans `prisma/migrations/`, puis remontent via `dev → main → prod`. **Ne jamais** créer une migration directement en production.
+- ⚠️ Changement **destructif** (suppression de colonne/table) : utiliser le motif **expand → contract** : (1) déployer d'abord le code qui n'utilise plus la colonne, (2) **ensuite** déployer la migration qui la supprime — pour éviter toute perte/incident pendant la transition.
+
+> Note : une montée de version qui **ne modifie pas le schéma** (ex. correctifs de code uniquement) n'a **aucune migration en attente** → `migrate deploy` est alors sans effet et il n'y a aucun risque pour les données.
+
+### Restauration (rollback)
+
+```bash
+# Restaurer la sauvegarde prise à l'étape 1
+cat /root/backups/livestream_<date>.sql | \
+  sudo docker exec -i livekit_postgresql psql -U <user> -d <database>
+# revenir au commit précédent côté code
+git reset --hard <commit-précédent> && pnpm build && sudo systemctl restart livestream
 ```
 
 ---
@@ -423,6 +508,7 @@ Bouton "Enregistrer" → /api/start_recording
 | Version | Description |
 |---------|-------------|
 | **v1-refonte** | Refonte architecturale de la plateforme : composants UI réutilisables, services métier, types centralisés, landing page publique, middleware sécurisé, URL S3 signées pour les enregistrements, sidebar avec icônes SVG |
+| **v1.1** | Sécurité : vérification de signature des tokens LiveKit, contrôle « créateur » sur les actions animateur (kick / enregistrement / diffusion / OBS), `create_stream` réservé aux animateurs, auto-provision des étudiants Moodle. UX : notification compacte des demandes de prise de parole + acceptation depuis la liste des participants. Diffusion **OBS (RTMP/WHIP)** réactivée depuis la page animateur. Retrait des identifiants de base codés en dur (`DATABASE_URL` requis). Flux Git **dev / main / prod**. |
 
 ---
 
