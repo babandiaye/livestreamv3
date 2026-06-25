@@ -16,20 +16,53 @@ type StatusResponse = {
   services: ServiceStatus[]
 }
 
-const STATUS_CONFIG: Record<string, { icon: string; color: string }> = {
-  ok: { icon: "✓", color: "#22c55e" },
-  error: { icon: "✗", color: "#ef4444" },
-  warning: { icon: "⚠", color: "#f59e0b" },
+const STATUS_CONFIG: Record<string, { color: string }> = {
+  ok: { color: "#22c55e" },
+  error: { color: "#ef4444" },
+  warning: { color: "#f59e0b" },
 }
 
-const SERVICE_ICONS: Record<string, string> = {
-  "PostgreSQL": "🗄",
-  "LiveKit SFU": "📡",
-  "Egress (Enregistrement)": "⏺",
-  "Ingress (OBS/RTMP)": "📹",
-  "MinIO (S3)": "💾",
-  "Webhook LiveKit": "🔔",
-  "Keycloak SSO": "🔐",
+const SVG_BASE = {
+  fill: "none", stroke: "currentColor", strokeWidth: 2,
+  strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
+}
+
+// Icône SVG par service (style Feather, hérite la couleur via currentColor)
+function ServiceIcon({ name }: { name: string }) {
+  const p = { width: 18, height: 18, viewBox: "0 0 24 24", ...SVG_BASE }
+  switch (name) {
+    case "PostgreSQL":
+      return (<svg {...p}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg>)
+    case "LiveKit SFU":
+      return (<svg {...p}><path d="M5 12.55a11 11 0 0 1 14.08 0" /><path d="M1.42 9a16 16 0 0 1 21.16 0" /><path d="M8.53 16.11a6 6 0 0 1 6.95 0" /><line x1="12" y1="20" x2="12.01" y2="20" /></svg>)
+    case "Egress (Enregistrement)":
+      return (<svg {...p}><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" /></svg>)
+    case "Ingress (OBS/RTMP)":
+      return (<svg {...p}><polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>)
+    case "MinIO (S3)":
+      return (<svg {...p}><line x1="22" y1="12" x2="2" y2="12" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /><line x1="6" y1="16" x2="6.01" y2="16" /><line x1="10" y1="16" x2="10.01" y2="16" /></svg>)
+    case "Webhook LiveKit":
+      return (<svg {...p}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>)
+    case "Keycloak SSO":
+      return (<svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>)
+    default:
+      return (<svg {...p}><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>)
+  }
+}
+
+// Icône d'état (check-circle / x-circle / alert-triangle)
+function StatusIcon({ status }: { status: "ok" | "error" | "warning" }) {
+  const p = { width: 14, height: 14, viewBox: "0 0 24 24", ...SVG_BASE }
+  if (status === "ok")
+    return (<svg {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>)
+  if (status === "error")
+    return (<svg {...p}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>)
+  return (<svg {...p}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>)
+}
+
+// Icône d'en-tête du panneau (monitoring / activité)
+function HeaderIcon() {
+  return (<svg width="17" height="17" viewBox="0 0 24 24" stroke="#0065b1" {...SVG_BASE}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>)
 }
 
 const OVERALL_LABELS: Record<string, { label: string; bg: string; color: string; border: string }> = {
@@ -69,8 +102,8 @@ export default function StatusPanel() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
               width: 32, height: 32, borderRadius: 8, background: "#f0f7ff",
-              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-            }}>🏥</div>
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}><HeaderIcon /></div>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1a2e" }}>
                 Statut des services
@@ -117,8 +150,8 @@ export default function StatusPanel() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8, background: "#f0f7ff",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-          }}>🏥</div>
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}><HeaderIcon /></div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1a2e" }}>
               Statut des services
@@ -180,7 +213,6 @@ export default function StatusPanel() {
       {/* Services list */}
       {data?.services.map((service) => {
         const conf = STATUS_CONFIG[service.status]
-        const icon = SERVICE_ICONS[service.name] ?? "⚙"
         const isExpanded = expanded === service.name
 
         return (
@@ -200,10 +232,11 @@ export default function StatusPanel() {
                 width: 36, height: 36, borderRadius: 9,
                 background: service.status === "ok" ? "#f0fdf4" :
                             service.status === "error" ? "#fef2f2" : "#fffbeb",
+                color: conf.color,
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 17, flexShrink: 0,
+                flexShrink: 0,
               }}>
-                {icon}
+                <ServiceIcon name={service.name} />
               </div>
 
               {/* Info */}
@@ -242,10 +275,8 @@ export default function StatusPanel() {
                                      service.status === "error" ? "#fecaca" : "#fde68a"}`,
                 flexShrink: 0,
               }}>
-                <span style={{
-                  fontSize: 13, fontWeight: 700, color: conf.color,
-                }}>
-                  {conf.icon}
+                <span style={{ display: "flex", color: conf.color }}>
+                  <StatusIcon status={service.status} />
                 </span>
                 <span style={{
                   fontSize: 12, fontWeight: 600, color: conf.color,

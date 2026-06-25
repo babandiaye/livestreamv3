@@ -1,6 +1,5 @@
 "use client"
 
-import Image from "next/image"
 import { signIn } from "next-auth/react"
 import Footer from "@/components/layout/Footer"
 
@@ -112,7 +111,8 @@ export default function HomeClient() {
       {/* ── Header ── */}
       <header className="lp-header">
         <div className="lp-brand">
-          <Image src="/logo-unchk.png" alt="UN-CHK" width={52} height={52} style={{ objectFit: "contain" }} priority />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-unchk.png" alt="UN-CHK" width={48} height={48} style={{ objectFit: "contain", display: "block" }} />
           <div className="lp-brand-sep" />
           <span className="lp-brand-txt">Plateforme Webinaire UN-CHK</span>
         </div>
