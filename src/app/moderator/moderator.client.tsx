@@ -284,6 +284,7 @@ export default function ModeratorClient({
                   <>
                     <RecordingList
                       recordings={pagedRecordings}
+                      canDelete
                       showSession
                       onDelete={(id) => setRecordings((prev) => prev.filter((r) => r.id !== id))}
                     />

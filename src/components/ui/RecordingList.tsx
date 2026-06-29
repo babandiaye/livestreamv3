@@ -62,7 +62,12 @@ export default function RecordingList({
     if (!confirm(`Supprimer « ${rec.filename} » ?`)) return
     setDeleting(rec.id)
     try {
-      await fetch(`/api/recordings/${rec.id}`, { method: "DELETE" })
+      const res = await fetch(`/api/recordings/${rec.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "")
+        alert("Échec de la suppression" + (msg ? ` : ${msg}` : ""))
+        return
+      }
       onDelete?.(rec.id)
     } finally {
       setDeleting(null)
