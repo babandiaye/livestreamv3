@@ -1,7 +1,11 @@
 node_modules/
 .next/
 .env
+.env.*
 .env.local
+env.local
+env.local.bck
+*.bck
 *.pem
 *.key
 .claude
