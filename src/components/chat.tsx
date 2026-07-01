@@ -2,7 +2,7 @@
 
 import { useChat, useLocalParticipant, useRoomInfo } from "@livekit/components-react";
 import { RoomMetadata } from "@/lib/controller";
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 
 export function Chat() {
   const [draft, setDraft] = useState("");
@@ -37,10 +37,17 @@ export function Chat() {
 
   const canSend = chatEnabled && draft.trim().length > 0 && !cooldown;
 
+  // Auto-défilement vers le dernier message
+  const messagesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
+
   return (
     <div className="chat-root">
       <div className="chat-header">💬 Chat en direct</div>
-      <div className="chat-messages">
+      <div className="chat-messages" ref={messagesRef}>
         {messages.length === 0 && <div className="chat-empty">Aucun message pour l'instant</div>}
         {messages.map((msg) => {
           const isMe = msg.from?.identity === localParticipant.identity;
@@ -69,9 +76,9 @@ export function Chat() {
       </div>
 
       <style>{`
-        .chat-root { display:flex; flex-direction:column; height:100%; }
+        .chat-root { display:flex; flex-direction:column; flex:1; min-height:0; height:100%; }
         .chat-header { padding:14px 16px; border-bottom:1px solid #3c4043; font-size:0.85rem; font-weight:600; color:#e8eaed; flex-shrink:0; }
-        .chat-messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
+        .chat-messages { flex:1; min-height:0; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
         .chat-empty { color:#5f6368; font-size:0.85rem; text-align:center; margin-top:32px; }
         .chat-msg { display:flex; flex-direction:column; gap:2px; }
         .chat-msg.mine { align-items:flex-end; }
