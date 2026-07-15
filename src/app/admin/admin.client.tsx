@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import Sidebar from "@/components/layout/Sidebar"
 import Footer from "@/components/layout/Footer"
 import Avatar from "@/components/ui/Avatar"
+import RoomIcon from "@/components/ui/RoomIcon"
 import Pagination from "@/components/ui/Pagination"
 import { SessionBadge, RoleBadge } from "@/components/ui/Badge"
 import RecordingList from "@/components/ui/RecordingList"
@@ -79,6 +80,16 @@ export default function AdminClient({
   const [roomPage, setRoomPage] = useState(1)
   const [userSearch, setUserSearch] = useState("")
 
+  // Import CSV utilisateurs
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ total: number; created: number; skipped: number } | null>(null)
+
+  // Sélection multiple + changement de rôle en lot
+  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
+  const [bulkRole, setBulkRole] = useState<Role>("VIEWER")
+  const [bulkUpdating, setBulkUpdating] = useState(false)
+
   // Création salle
   const [showCreate, setShowCreate] = useState(false)
   const [title, setTitle] = useState("")
@@ -114,6 +125,55 @@ export default function AdminClient({
     if (nav === "rooms")      fetchRooms()
     if (nav === "recordings") fetchRecordings()
   }, [nav, fetchUsers, fetchRooms, fetchRecordings])
+
+  const importCsv = async (file: File) => {
+    setImporting(true)
+    setImportResult(null)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      const res = await fetch("/api/admin/users/import-csv", { method: "POST", body: fd })
+      if (!res.ok) {
+        alert("Échec de l'import : " + (await res.text().catch(() => "")))
+        return
+      }
+      const d = await res.json()
+      setImportResult(d.summary)
+      setUserPage(1)
+      await fetchUsers()
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const toggleUser = (id: string) =>
+    setSelectedUsers((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const applyBulkRole = async () => {
+    const ids = [...selectedUsers]
+    if (ids.length === 0) return
+    setBulkUpdating(true)
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: ids, role: bulkRole }),
+      })
+      if (!res.ok) {
+        alert("Échec du changement de rôle : " + (await res.text().catch(() => "")))
+        return
+      }
+      const idSet = new Set(ids)
+      setUsers((prev) => prev.map((u) => idSet.has(u.id) ? { ...u, role: bulkRole } : u))
+      setSelectedUsers(new Set())
+    } finally {
+      setBulkUpdating(false)
+    }
+  }
 
   const changeRole = async (userId: string, role: string) => {
     setUpdatingRole(userId)
@@ -270,36 +330,37 @@ export default function AdminClient({
                     <div
                       key={room.id}
                       onClick={() => { setSelectedRoom(room); setRoomSubTab("enroll") }}
-                      style={{ padding: "12px 16px", borderBottom: "1px solid #f0f7ff", cursor: "pointer", background: selectedRoom?.id === room.id ? "#f0f7ff" : "white", transition: "background 0.1s" }}
+                      style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: "1px solid #f0f7ff", cursor: "pointer", background: selectedRoom?.id === room.id ? "#f0f7ff" : "white", transition: "background 0.1s" }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                        <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e" }}>{room.title}</span>
-                        <SessionBadge status={room.status} />
+                      <RoomIcon />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.title}</div>
+                        <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, marginTop: 3, flexWrap: "wrap" }}>
+                          <span>👤 {room.creator?.name}</span>
+                          <span>📋 {room.enrollments ?? 0} enrôlés</span>
+                          <span>🎬 {room.recordings.length} enreg.</span>
+                        </div>
                       </div>
-                      <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, marginBottom: 8 }}>
-                        <span>👤 {room.creator?.name}</span>
-                        <span>📋 {room.enrollments ?? 0} enrôlés</span>
-                        <span>🎬 {room.recordings.length} enreg.</span>
-                      </div>
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                         <button
                           onClick={(e) => { e.stopPropagation(); startMeeting(room) }}
-                          style={{ padding: "3px 10px", background: "#0065b1", color: "white", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ padding: "5px 12px", background: "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
                           ▶ Démarrer
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); copyLink(room.roomName) }}
-                          style={{ padding: "3px 10px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ padding: "5px 12px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
                           🔗 Lien
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); deleteRoom(room.id) }}
-                          style={{ padding: "3px 10px", background: "white", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ padding: "5px 12px", background: "white", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          Supprimer
+                          🗑 Supprimer
                         </button>
+                        <SessionBadge status={room.status} />
                       </div>
                     </div>
                   ))}
@@ -342,58 +403,124 @@ export default function AdminClient({
           {/* ── UTILISATEURS ── */}
           {nav === "users" && (
             <div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>Utilisateurs</h2>
                   <span style={{ background: "#e8f4ff", color: "#0065b1", fontSize: 13, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>{filteredUsers.length}</span>
                 </div>
-                <input
-                  value={userSearch}
-                  onChange={(e) => { setUserSearch(e.target.value); setUserPage(1) }}
-                  placeholder="Rechercher…"
-                  style={{ padding: "7px 12px", border: "1px solid #e2e8f0", borderRadius: 7, fontSize: 14, fontFamily: "inherit", outline: "none", width: 220 }}
-                />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <a
+                    href="/api/admin/enroll-csv-template"
+                    style={{ padding: "7px 14px", background: "#f3f4f6", color: "#374151", border: "1px solid #e2e8f0", borderRadius: 7, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", textDecoration: "none" }}
+                  >
+                    ⬇ Modèle CSV
+                  </a>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={importing}
+                    style={{ padding: "7px 14px", background: "#0065b1", color: "white", border: "none", borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: importing ? "default" : "pointer", fontFamily: "inherit", opacity: importing ? 0.6 : 1 }}
+                  >
+                    {importing ? "Import…" : "⬆ Importer CSV"}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    style={{ display: "none" }}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv(f); e.target.value = "" }}
+                  />
+                  <input
+                    value={userSearch}
+                    onChange={(e) => { setUserSearch(e.target.value); setUserPage(1) }}
+                    placeholder="Rechercher…"
+                    style={{ padding: "7px 12px", border: "1px solid #e2e8f0", borderRadius: 7, fontSize: 14, fontFamily: "inherit", outline: "none", width: 200 }}
+                  />
+                </div>
               </div>
+
+              {importResult && (
+                <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#065f46", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <span>✓ Import terminé — <strong>{importResult.created}</strong> créé(s), {importResult.skipped} déjà existant(s) sur {importResult.total} ligne(s) valide(s).</span>
+                  <button onClick={() => setImportResult(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#065f46", fontSize: 16, lineHeight: 1 }}>✕</button>
+                </div>
+              )}
               <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
-                {loading ? <Spinner /> : (
+                {loading ? <Spinner /> : filteredUsers.length === 0 ? <Empty text="Aucun utilisateur" /> : (
                   <>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ borderBottom: "1px solid #f0f7ff", background: "#f8fbff" }}>
-                          {["Nom", "Email", "Rôle", "Sessions", "Depuis", "Changer rôle"].map((h) => (
-                            <th key={h} style={{ padding: "10px 16px", fontSize: 12, fontWeight: 600, color: "#6b7280", textAlign: "left" }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pagedUsers.map((u) => (
-                          <tr key={u.id} style={{ borderBottom: "1px solid #f9fbff" }}>
-                            <td style={{ padding: "10px 16px" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <Avatar name={u.name} size={26} color={u.role === "ADMIN" ? "#b91c1c" : u.role === "MODERATOR" ? "#0065b1" : "#6b7280"} />
-                                <span style={{ fontSize: 14, fontWeight: 500, color: "#1a1a2e" }}>{u.name}</span>
-                              </div>
-                            </td>
-                            <td style={{ padding: "10px 16px", fontSize: 13, color: "#6b7280" }}>{u.email}</td>
-                            <td style={{ padding: "10px 16px" }}><RoleBadge role={u.role} /></td>
-                            <td style={{ padding: "10px 16px", fontSize: 14, color: "#6b7280", textAlign: "center" }}>{u.sessionCount}</td>
-                            <td style={{ padding: "10px 16px", fontSize: 13, color: "#6b7280" }}>{new Date(u.createdAt).toLocaleDateString("fr-FR")}</td>
-                            <td style={{ padding: "10px 16px" }}>
-                              <select
-                                value={u.role}
-                                disabled={updatingRole === u.id}
-                                onChange={(e) => changeRole(u.id, e.target.value)}
-                                style={{ padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer" }}
-                              >
-                                <option value="VIEWER">Spectateur</option>
-                                <option value="MODERATOR">Modérateur</option>
-                                <option value="ADMIN">Administrateur</option>
-                              </select>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    {/* Barre de sélection / action groupée */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f0f7ff", background: "#f8fbff", flexWrap: "wrap" }}>
+                      <input
+                        type="checkbox"
+                        checked={filteredUsers.length > 0 && filteredUsers.every((u) => selectedUsers.has(u.id))}
+                        onChange={(e) => setSelectedUsers(e.target.checked ? new Set(filteredUsers.map((u) => u.id)) : new Set())}
+                        style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }}
+                      />
+                      {selectedUsers.size === 0 ? (
+                        <span style={{ fontSize: 13, color: "#6b7280" }}>Tout sélectionner</span>
+                      ) : (
+                        <>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "#0065b1" }}>{selectedUsers.size} sélectionné(s)</span>
+                          <span style={{ fontSize: 13, color: "#6b7280" }}>— attribuer le rôle :</span>
+                          <select
+                            value={bulkRole}
+                            onChange={(e) => setBulkRole(e.target.value as Role)}
+                            style={{ padding: "5px 10px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer" }}
+                          >
+                            <option value="VIEWER">Spectateur</option>
+                            <option value="MODERATOR">Modérateur</option>
+                            <option value="ADMIN">Administrateur</option>
+                          </select>
+                          <button
+                            onClick={applyBulkRole}
+                            disabled={bulkUpdating}
+                            style={{ padding: "5px 14px", background: "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: bulkUpdating ? "default" : "pointer", fontFamily: "inherit", opacity: bulkUpdating ? 0.6 : 1 }}
+                          >
+                            {bulkUpdating ? "Application…" : "Appliquer"}
+                          </button>
+                          <button
+                            onClick={() => setSelectedUsers(new Set())}
+                            style={{ padding: "5px 10px", background: "none", color: "#6b7280", border: "none", borderRadius: 6, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
+                          >
+                            Annuler
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {pagedUsers.map((u) => (
+                      <div
+                        key={u.id}
+                        style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: "1px solid #f0f7ff", background: selectedUsers.has(u.id) ? "#f0f7ff" : "white" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedUsers.has(u.id)}
+                          onChange={() => toggleUser(u.id)}
+                          style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }}
+                        />
+                        <Avatar name={u.name} size={44} color={u.role === "ADMIN" ? "#b91c1c" : u.role === "MODERATOR" ? "#0065b1" : "#6b7280"} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
+                          <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, marginTop: 3, flexWrap: "wrap" }}>
+                            <span>✉️ {u.email}</span>
+                            <span>🎬 {u.sessionCount} sessions</span>
+                            <span>📅 {new Date(u.createdAt).toLocaleDateString("fr-FR")}</span>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                          <RoleBadge role={u.role} />
+                          <select
+                            value={u.role}
+                            disabled={updatingRole === u.id}
+                            onChange={(e) => changeRole(u.id, e.target.value)}
+                            style={{ padding: "6px 10px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13, fontFamily: "inherit", cursor: "pointer" }}
+                          >
+                            <option value="VIEWER">Spectateur</option>
+                            <option value="MODERATOR">Modérateur</option>
+                            <option value="ADMIN">Administrateur</option>
+                          </select>
+                        </div>
+                      </div>
+                    ))}
                     <Pagination total={filteredUsers.length} page={userPage} onPage={setUserPage} />
                   </>
                 )}

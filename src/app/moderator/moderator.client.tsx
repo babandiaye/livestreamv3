@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import Sidebar from "@/components/layout/Sidebar"
 import Footer from "@/components/layout/Footer"
 import Pagination from "@/components/ui/Pagination"
+import RoomIcon from "@/components/ui/RoomIcon"
 import { SessionBadge } from "@/components/ui/Badge"
 import RecordingList from "@/components/ui/RecordingList"
 import EnrollPanel from "@/components/ui/EnrollPanel"
@@ -205,34 +206,35 @@ export default function ModeratorClient({
                     <div
                       key={room.id}
                       onClick={() => { setSelectedRoom(room); setRoomSubTab("enroll") }}
-                      style={{ padding: "12px 16px", borderBottom: "1px solid #f0f7ff", cursor: "pointer", background: selectedRoom?.id === room.id ? "#f0f7ff" : "white", transition: "background 0.1s" }}
+                      style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: "1px solid #f0f7ff", cursor: "pointer", background: selectedRoom?.id === room.id ? "#f0f7ff" : "white", transition: "background 0.1s" }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                        <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e" }}>{room.title}</span>
-                        <SessionBadge status={room.status} />
+                      <RoomIcon />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.title}</div>
+                        <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 3 }}>
+                          {new Date(room.createdAt).toLocaleDateString("fr-FR")}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 8 }}>
-                        {new Date(room.createdAt).toLocaleDateString("fr-FR")}
-                      </div>
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                         <button
                           onClick={(e) => { e.stopPropagation(); startMeeting(room) }}
-                          style={{ padding: "3px 10px", background: "#0065b1", color: "white", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ padding: "5px 12px", background: "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
                           ▶ Démarrer
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); copyLink(room.roomName) }}
-                          style={{ padding: "3px 10px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ padding: "5px 12px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
                           🔗 Lien
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); deleteRoom(room.id) }}
-                          style={{ padding: "3px 10px", background: "white", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 5, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ padding: "5px 12px", background: "white", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          Supprimer
+                          🗑 Supprimer
                         </button>
+                        <SessionBadge status={room.status} />
                       </div>
                     </div>
                   ))}

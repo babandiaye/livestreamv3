@@ -32,8 +32,25 @@ export async function PATCH(req: Request) {
   if (!session || session.user.role !== "ADMIN")
     return NextResponse.json({ error: "Non autorisé" }, { status: 403 })
 
-  const { userId, role } = await req.json()
-  if (!userId || !role || !["ADMIN", "MODERATOR", "VIEWER"].includes(role))
+  const { userId, userIds, role } = await req.json()
+  if (!role || !["ADMIN", "MODERATOR", "VIEWER"].includes(role))
+    return NextResponse.json({ error: "Rôle invalide" }, { status: 400 })
+
+  // Modification en lot : liste d'identifiants
+  if (Array.isArray(userIds)) {
+    const ids = userIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+    if (ids.length === 0)
+      return NextResponse.json({ error: "Aucun utilisateur sélectionné" }, { status: 400 })
+
+    const res = await prisma.user.updateMany({
+      where: { id: { in: ids } },
+      data: { role },
+    })
+    return NextResponse.json({ updated: res.count, role })
+  }
+
+  // Modification unitaire
+  if (!userId)
     return NextResponse.json({ error: "Paramètres invalides" }, { status: 400 })
 
   const updated = await prisma.user.update({
