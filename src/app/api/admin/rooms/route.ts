@@ -12,7 +12,18 @@ export async function GET() {
   const user = await prisma.user.findUnique({ where: { id: session.user.id } })
   if (!user) return NextResponse.json({ error: "Utilisateur non trouvé" }, { status: 404 })
 
-  const where = user.role === "MODERATOR" ? { creatorId: user.id } : {}
+  // Un modérateur voit les salles qu'il a créées ET celles où il est enrôlé
+  // (ex. salle créée depuis Moodle par un administrateur, enseignant enrôlé au
+  // cours) — il peut ainsi la voir et démarrer la session depuis la plateforme.
+  const where =
+    user.role === "MODERATOR"
+      ? {
+          OR: [
+            { creatorId: user.id },
+            { enrollments: { some: { userId: user.id } } },
+          ],
+        }
+      : {}
 
   const rooms = await prisma.session.findMany({
     where,
