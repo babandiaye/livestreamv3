@@ -76,6 +76,8 @@ export default function StudentClient({
         body: JSON.stringify({
           room_name: room.roomName,
           identity,
+          user_id: user.id,
+          user_email: user.email ?? undefined,
         }),
       })
 

@@ -9,6 +9,7 @@ import { Play, Link, X, Trash2 } from "@/components/ui/icons"
 import { SessionBadge } from "@/components/ui/Badge"
 import RecordingList from "@/components/ui/RecordingList"
 import EnrollPanel from "@/components/ui/EnrollPanel"
+import AttendancePanel from "@/components/ui/AttendancePanel"
 import type { Room, Recording, Role } from "@/types"
 import { PAGE_SIZE } from "@/types"
 
@@ -50,7 +51,7 @@ export default function ModeratorClient({
   const [loading, setLoading] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
-  const [roomSubTab, setRoomSubTab] = useState<"enroll" | "settings">("enroll")
+  const [roomSubTab, setRoomSubTab] = useState<"enroll" | "settings" | "attendance">("enroll")
   const [roomPage, setRoomPage] = useState(1)
   const [recPage, setRecPage] = useState(1)
 
@@ -111,6 +112,7 @@ export default function ModeratorClient({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         room_name: room.roomName,
+        user_id: user.id,
         metadata: {
           creator_identity: user.name ?? user.email ?? "Modérateur",
           enable_chat: room.chatEnabled,
@@ -256,26 +258,30 @@ export default function ModeratorClient({
                     <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#1a1a2e" }}>{selectedRoom.title}</h2>
                     <button aria-label="Fermer" onClick={() => setSelectedRoom(null)} style={{ display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer", color: "#9ca3af" }}><X size={18} /></button>
                   </div>
-                  <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
-                    {(["enroll", "settings"] as const).map((t) => (
+                  <div style={{ display: "flex", gap: 4, marginBottom: 12, flexWrap: "wrap" }}>
+                    {(["enroll", "attendance", "settings"] as const).map((t) => (
                       <button
                         key={t}
                         onClick={() => setRoomSubTab(t)}
                         style={{ padding: "6px 14px", border: "1px solid", borderColor: roomSubTab === t ? "#0065b1" : "#e2e8f0", background: roomSubTab === t ? "#0065b1" : "white", color: roomSubTab === t ? "white" : "#374151", borderRadius: 7, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                       >
-                        {t === "enroll" ? "Participants" : "Paramètres"}
+                        {t === "enroll" ? "Participants" : t === "attendance" ? "Présence" : "Paramètres"}
                       </button>
                     ))}
                   </div>
-                  <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
-                    {roomSubTab === "enroll" && <EnrollPanel sessionId={selectedRoom.id} />}
-                    {roomSubTab === "settings" && (
-                      <RoomSettings
-                        room={selectedRoom}
-                        onUpdate={(r) => { setSelectedRoom(r); setRooms((prev) => prev.map((x) => x.id === r.id ? r : x)) }}
-                      />
-                    )}
-                  </div>
+                  {roomSubTab === "attendance" ? (
+                    <AttendancePanel sessionId={selectedRoom.id} roomTitle={selectedRoom.title} />
+                  ) : (
+                    <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+                      {roomSubTab === "enroll" && <EnrollPanel sessionId={selectedRoom.id} />}
+                      {roomSubTab === "settings" && (
+                        <RoomSettings
+                          room={selectedRoom}
+                          onUpdate={(r) => { setSelectedRoom(r); setRooms((prev) => prev.map((x) => x.id === r.id ? r : x)) }}
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

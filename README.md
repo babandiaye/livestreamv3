@@ -230,16 +230,43 @@ src/
 │   ├── egress-layout/          # Layout composite pour l'enregistrement
 │   └── api/                    # Routes API (38 endpoints)
 ├── components/
-│   ├── layout/                 # Sidebar, Footer
-│   └── ui/                     # Avatar, Badge, Pagination, RecordingList, EnrollPanel
+│   ├── layout/                 # Sidebar (tiroir mobile), Footer
+│   └── ui/                     # Avatar, Badge, Pagination, RoomIcon, icons (Lucide),
+│                               #   RecordingList, EnrollPanel, AttendancePanel
 ├── lib/
 │   ├── services/               # enrollment / recording / session
 │   ├── controller.ts           # Orchestration LiveKit
+│   ├── attendance.ts           # Liste de présence (join/left/orphelins + agrégation)
+│   ├── egress.ts               # Réconciliation des enregistrements
 │   └── prisma.ts
 ├── types/index.ts              # Types centralisés + utilitaires (formatDuration, formatSize)
 ├── auth.ts                     # NextAuth config (Keycloak + Credentials)
 └── middleware.ts               # Gardien des routes
 ```
+
+---
+
+## Liste de présence (émargement)
+
+Chaque salle dispose d'un onglet **Présence** (côté admin et modérateur créateur/enrôlé) qui reconstitue l'émargement des sessions.
+
+**Fonctionnement** — le SFU LiveKit envoie des webhooks à `/api/webhook/livekit` :
+
+- `participant_joined` → une ligne `Attendance` est créée (**une ligne par connexion réelle**) ;
+- `participant_left` → la connexion correspondante est refermée (calcul de la durée) ;
+- `room_finished` → filet de sécurité : toutes les connexions restées ouvertes (webhook perdu, coupure) sont refermées avec l'heure de fin.
+
+Les participants **système** (egress `egress-recorder-*`, ingress `… (via OBS)`) sont **exclus**. Une reconnexion crée une nouvelle ligne ; `lib/attendance.ts` **somme les durées** et compte les reconnexions. Le champ `sessionStartedAt` sépare deux réunions successives tenues dans la **même** salle réutilisée.
+
+**Rattachement nominatif** — la référence de l'utilisateur (`userId`/`email`) est transportée dans la **metadata du token** de connexion (posée par `join_stream`, `moodle/join`, `create_stream`), puis résolue par le webhook :
+
+- **Moodle** et **étudiant authentifié** → rattachés à leur compte (badge « Compte ») ;
+- **animateur** → badge « Animateur » ;
+- **invité `/watch`** (sans authentification) → badge « Invité » (non vérifié).
+
+**Restitution** — sessions groupées et repliables (label `salle-timestamp`, bouton **Détail/œil**), avec temps total, heures d'arrivée/départ, nombre de reconnexions, **pagination** (sessions et participants) et **export CSV**.
+
+> ⚠️ La table `Attendance` est ajoutée par la migration `add_attendance` → penser à `prisma migrate deploy` lors du déploiement (voir plus bas).
 
 ---
 
@@ -298,6 +325,8 @@ sudo systemctl status livestream --no-pager
 ## Migration de la base de données sans perte de données
 
 La plateforme utilise les **migrations Prisma** (`prisma/migrations/`). En production on applique **uniquement** `migrate deploy`, qui exécute les migrations en attente de façon **additive et non destructive** — il ne réinitialise jamais la base.
+
+> `prisma.config.ts` charge automatiquement `.env`/`.env.local` (via `dotenv`) et utilise `process.env.DATABASE_URL` **sans aucune valeur par défaut codée en dur** (évite tout risque de pointer vers la mauvaise base). Les commandes `prisma migrate …` lisent donc l'URL depuis `.env` sans qu'on ait à la passer manuellement.
 
 ### Procédure sûre
 

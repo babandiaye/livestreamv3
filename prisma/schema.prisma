@@ -32,6 +32,7 @@ model User {
   role        Role         @default(VIEWER)
   sessions    Session[]
   enrollments Enrollment[]
+  attendances Attendance[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -52,6 +53,7 @@ model Session {
   moodleMeetingId      String?
   recordings           Recording[]
   enrollments          Enrollment[]
+  attendances          Attendance[]
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 }
@@ -70,6 +72,31 @@ model Recording {
   startedAt   DateTime?
   publishable Boolean         @default(true)
   createdAt   DateTime        @default(now())
+}
+
+// Une ligne par CONNEXION LiveKit réelle (participant_joined/participant_left),
+// pas une ligne par utilisateur : une reconnexion (coupure réseau, rafraîchissement)
+// crée une nouvelle ligne, sommées côté lib/attendance pour le temps de présence.
+// leftAt reste null tant que le participant_left correspondant n'est pas arrivé
+// (fermé au plus tard sur room_finished).
+model Attendance {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  identity    String
+  name        String
+  isModerator Boolean  @default(false)
+  // Session.startedAt au moment de la connexion : une salle est réutilisable, donc
+  // sessionId seul ne distingue pas deux réunions successives dans la même salle.
+  sessionStartedAt DateTime
+  joinedAt    DateTime
+  leftAt      DateTime?
+
+  @@index([sessionId])
+  @@index([userId])
+  @@index([sessionId, sessionStartedAt])
 }
 
 model Enrollment {

@@ -1,12 +1,15 @@
 import path from 'node:path'
 import { defineConfig } from 'prisma/config'
+import { config as dotenvConfig } from 'dotenv'
 
-const DATABASE_URL = process.env.DATABASE_URL ?? 
-  'postgresql://livekit:LivekitUnchk2026!@127.0.0.1:5432/livestreamv2'
+// Charge les variables d'environnement pour le CLI Prisma (migrate/generate).
+// .env.local a priorité sur .env (dotenv n'écrase pas une variable déjà définie).
+dotenvConfig({ path: '.env.local' })
+dotenvConfig()
 
 export default defineConfig({
   schema: path.join('prisma', 'schema.prisma'),
   datasource: {
-    url: DATABASE_URL,
+    url: process.env.DATABASE_URL!,
   },
 })

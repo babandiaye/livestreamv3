@@ -44,7 +44,8 @@ export async function POST(req: NextRequest) {
   const at = new AccessToken(
     process.env.LIVEKIT_API_KEY!,
     process.env.LIVEKIT_API_SECRET!,
-    { identity: userEmail, name: userName, ttl: "8h" }
+    // metadata : rattache la présence au compte (lu par le webhook au join)
+    { identity: userEmail, name: userName, metadata: JSON.stringify({ userId: user.id, email: userEmail, isModerator: false }), ttl: "8h" }
   )
   at.addGrant({
     room: room.roomName,

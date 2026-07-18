@@ -24,6 +24,21 @@ html, body {
 .dash-hamburger { display: none; }
 .dash-backdrop  { display: none; }
 
+/* Les cartes de la colonne « salles » doivent s'empiler selon la largeur de LEUR
+   colonne (380px quand le panneau détail est ouvert), pas selon celle de l'écran :
+   sur desktop le viewport reste large, donc une media query ne suffit pas → on
+   utilise une container query. Empêche le chevauchement icône/texte/boutons. */
+.dash-col-list { container-type: inline-size; }
+
+@container (max-width: 520px) {
+  .dash-row { flex-wrap: wrap; row-gap: 10px; }
+  .dash-actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 900px) {
   /* Layouts 2 colonnes → empilement vertical */
   .dash-cols     { flex-direction: column !important; }

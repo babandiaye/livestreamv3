@@ -1,6 +1,7 @@
 import { WebhookReceiver } from "livekit-server-sdk"
 import { prisma } from "@/lib/prisma"
 import { egressClient, isRecordingEgress } from "@/lib/egress"
+import { recordJoin, recordLeave, closeOrphans } from "@/lib/attendance"
 import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 
@@ -34,6 +35,18 @@ export async function POST(req: NextRequest) {
         data: { status: "LIVE", startedAt: new Date() },
       })
       console.log("[webhook] Session LIVE via participant_joined:", roomName)
+
+      // ── Présence : enregistrer la connexion (hors egress/OBS) ──
+      if (event.participant) {
+        const p = event.participant
+        const joinedAt = p.joinedAt ? new Date(Number(p.joinedAt) * 1000) : new Date()
+        await recordJoin(roomName, p.identity, p.name || p.identity, p.metadata, joinedAt)
+      }
+    }
+
+    // ── Présence : participant parti → fermer sa connexion ──
+    if (event.event === "participant_left" && event.room && event.participant) {
+      await recordLeave(event.room.name, event.participant.identity, new Date())
     }
 
     // ── Room terminée → ENDED ──
@@ -44,6 +57,9 @@ export async function POST(req: NextRequest) {
         data: { status: "ENDED", endedAt: new Date() },
       })
       console.log("[webhook] Session ENDED:", roomName)
+
+      // ── Présence : refermer les connexions restées ouvertes ──
+      await closeOrphans(roomName, new Date())
 
       // #3 — Filet de sécurité : arrêter tout enregistrement encore actif pour
       // cette room. Le web egress n'est PAS lié au cycle de vie de la room ; si

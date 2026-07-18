@@ -56,6 +56,7 @@ export type CreateIngressResponse = {
 export type CreateStreamParams = {
   room_name?: string;
   metadata: RoomMetadata;
+  user_id?: string; // pour la liste de présence (animateur rattaché à son compte)
 };
 
 export type CreateStreamResponse = {
@@ -66,6 +67,8 @@ export type CreateStreamResponse = {
 export type JoinStreamParams = {
   room_name: string;
   identity: string;
+  user_id?: string;    // rattache la présence à un compte (étudiant authentifié)
+  user_email?: string; // repli de rattachement par email (parcours Moodle/Keycloak)
 };
 
 export type JoinStreamResponse = {
@@ -258,7 +261,7 @@ export class Controller {
     };
   }
 
-  async createStream({ metadata, room_name }: CreateStreamParams): Promise<CreateStreamResponse> {
+  async createStream({ metadata, room_name, user_id }: CreateStreamParams): Promise<CreateStreamResponse> {
     if (!room_name) room_name = generateRoomId();
 
     await this.roomService.createRoom({
@@ -266,10 +269,14 @@ export class Controller {
       metadata: JSON.stringify(metadata),
     });
 
+    // L'animateur figure dans la liste de présence en tant que modérateur.
+    const attendee: Record<string, unknown> = { isModerator: true };
+    if (user_id) attendee.userId = user_id;
+
     const at = new AccessToken(
       process.env.LIVEKIT_API_KEY!,
       process.env.LIVEKIT_API_SECRET!,
-      { identity: metadata.creator_identity, ttl: "10h" }
+      { identity: metadata.creator_identity, metadata: JSON.stringify(attendee), ttl: "10h" }
     );
     at.addGrant({
       room: room_name,
@@ -296,13 +303,19 @@ export class Controller {
     await this.roomService.deleteRoom(session.room_name);
   }
 
-  async joinStream({ identity: displayName, room_name }: JoinStreamParams): Promise<JoinStreamResponse> {
+  async joinStream({ identity: displayName, room_name, user_id, user_email }: JoinStreamParams): Promise<JoinStreamResponse> {
     const identity = crypto.randomUUID();
+
+    // Référence utilisateur pour la liste de présence (lue par le webhook au
+    // participant_joined). Vide pour un invité anonyme (/watch sans compte).
+    const attendee: Record<string, unknown> = { isModerator: false };
+    if (user_id) attendee.userId = user_id;
+    if (user_email) attendee.email = user_email;
 
     const at = new AccessToken(
       process.env.LIVEKIT_API_KEY!,
       process.env.LIVEKIT_API_SECRET!,
-      { identity, name: displayName, ttl: "10h" }
+      { identity, name: displayName, metadata: JSON.stringify(attendee), ttl: "10h" }
     );
     at.addGrant({
       room: room_name,

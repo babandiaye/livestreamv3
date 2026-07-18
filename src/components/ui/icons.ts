@@ -26,4 +26,6 @@ export {
   Monitor,
   Clock,
   Trash2,
+  Eye,
+  ChevronDown,
 } from "lucide-react"
