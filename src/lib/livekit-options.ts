@@ -39,9 +39,17 @@ export const publisherRoomOptions: RoomOptions = {
 };
 
 // Vue d'enregistrement (page /egress-layout) : doit TOUJOURS recevoir la
-// meilleure couche disponible (sortie 1080p). adaptiveStream/dynacast y seraient
-// contre-productifs (ils dégraderaient ou mettraient en pause le flux enregistré
-// selon la taille de rendu du navigateur egress), donc explicitement désactivés.
+// meilleure couche disponible de chaque publieur.
+// - adaptiveStream:false est le réglage QUI COMPTE : sinon les éléments masqués
+//   ou petits du layout (PiP, canvas caché) verraient leur piste dégradée voire
+//   mise en pause côté serveur — inacceptable pour un enregistrement.
+// - dynacast:false est ici un no-op (dynacast agit côté ÉMETTEUR ; l'egress ne
+//   publie pas), conservé par symétrie/lisibilité.
+// Nuance sortie : le composite est encodé en 1080p, mais « meilleure couche » du
+// host = sa résolution de capture. L'écran/slides (publisherRoomOptions ne plafonne
+// pas screenShareEncoding → défaut SDK ~1080p) est du vrai 1080p ; un plan CAMÉRA
+// plein cadre plafonne à 720p (videoCaptureDefaults) puis est upscalé — compromis
+// assumé depuis l'incident du 16/07.
 export const egressRoomOptions: RoomOptions = {
   adaptiveStream: false,
   dynacast: false,

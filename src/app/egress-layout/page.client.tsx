@@ -9,11 +9,22 @@ import { Track } from "livekit-client"
 import { egressRoomOptions } from "@/lib/livekit-options"
 import { useEffect, useRef, useState } from "react"
 
-type WBEvent = { v: 1; type: "draw"|"clear"|"text"; tool?: string; color?: string; size?: number; x0?: number; y0?: number; x1?: number; y1?: number; text?: string; fontSize?: number; tx?: number; ty?: number }
-type WBInit  = { v: 1; type: "init"; events: WBEvent[] }
+type ShapeType = "rect" | "circle" | "line" | "arrow"
+type WBEvent = { v: 1; type: "draw"|"clear"|"text"|"shape"; tool?: string; shape?: ShapeType; color?: string; size?: number; filled?: boolean; x0?: number; y0?: number; x1?: number; y1?: number; text?: string; fontSize?: number; tx?: number; ty?: number }
+type WBInit  = { v: 1; type: "init"; events: WBEvent[]; seq: number; final: boolean }
 type WBMsg   = WBEvent | WBInit
 
 const WB_TOPIC = "wb"
+
+function drawArrow(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  const headLen = Math.max(12, Math.sqrt((x1-x0)**2 + (y1-y0)**2) * 0.15)
+  const angle = Math.atan2(y1 - y0, x1 - x0)
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(x1, y1)
+  ctx.lineTo(x1 - headLen * Math.cos(angle - Math.PI / 6), y1 - headLen * Math.sin(angle - Math.PI / 6))
+  ctx.lineTo(x1 - headLen * Math.cos(angle + Math.PI / 6), y1 - headLen * Math.sin(angle + Math.PI / 6))
+  ctx.closePath(); ctx.fillStyle = ctx.strokeStyle as string; ctx.fill()
+}
 
 function replayEvent(ctx: CanvasRenderingContext2D, ev: WBEvent) {
   if (ev.type === "clear") { ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height); return }
@@ -41,6 +52,28 @@ function replayEvent(ctx: CanvasRenderingContext2D, ev: WBEvent) {
     ctx.moveTo(ev.x0 * ctx.canvas.width, ev.y0! * ctx.canvas.height)
     ctx.lineTo(ev.x1! * ctx.canvas.width, ev.y1! * ctx.canvas.height)
     ctx.stroke()
+    ctx.restore()
+    return
+  }
+
+  if (ev.type === "shape" && ev.x0 !== undefined && ev.x1 !== undefined) {
+    ctx.save()
+    ctx.globalCompositeOperation = "source-over"
+    ctx.strokeStyle = ev.color ?? "#1a1a2e"
+    ctx.fillStyle = ev.color ?? "#1a1a2e"
+    ctx.lineWidth = ev.size ?? 3
+    ctx.lineCap = "round"; ctx.lineJoin = "round"
+    const x = ev.x0 * ctx.canvas.width, y = ev.y0! * ctx.canvas.height
+    const x2 = ev.x1 * ctx.canvas.width, y2 = ev.y1! * ctx.canvas.height
+    const w = x2 - x, h = y2 - y
+    if (ev.shape === "rect") { ev.filled ? ctx.fillRect(x, y, w, h) : ctx.strokeRect(x, y, w, h) }
+    if (ev.shape === "circle") {
+      ctx.beginPath()
+      ctx.ellipse(x + w / 2, y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2)
+      ev.filled ? ctx.fill() : ctx.stroke()
+    }
+    if (ev.shape === "line") { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke() }
+    if (ev.shape === "arrow") { drawArrow(ctx, x, y, x2, y2) }
     ctx.restore()
   }
 }
@@ -86,10 +119,13 @@ function EgressRoom() {
   const { metadata: egressRoomMeta } = useRoomInfo()
   const chatRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const hasWbInit = useRef(false)
   const [showWhiteboard, setShowWhiteboard] = useState(false)
   const room = useRoomContext()
 
-  // Demander l'historique du tableau au montage
+  // Demander l'historique du tableau, puis RÉESSAYER jusqu'à réception : un
+  // enregistrement démarré en cours de session doit récupérer les tracés déjà
+  // présents (l'hôte peut ne pas répondre au 1er essai).
   useEffect(() => {
     const requestInit = () => {
       try {
@@ -99,9 +135,15 @@ function EgressRoom() {
         )
       } catch {}
     }
-    const t1 = setTimeout(requestInit, 1500)
-    const t2 = setTimeout(requestInit, 4000)
-    return () => { clearTimeout(t1); clearTimeout(t2) }
+    let attempts = 0
+    const tick = () => {
+      if (hasWbInit.current || attempts >= 20) { clearInterval(iv); clearTimeout(first); return }
+      attempts++
+      requestInit()
+    }
+    const first = setTimeout(tick, 800)
+    const iv = setInterval(tick, 2500)
+    return () => { clearInterval(iv); clearTimeout(first) }
   }, [room])
 
   // Recevoir events tableau blanc via data channels — filtré par topic
@@ -122,9 +164,11 @@ function EgressRoom() {
         const ctx = canvas.getContext("2d")!
 
         if (msg.type === "init") {
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
+          // Init multi-morceaux : seq 0 réinitialise, « final » clôt la réception.
+          if (msg.seq === 0) ctx.clearRect(0, 0, canvas.width, canvas.height)
           for (const ev of msg.events) replayEvent(ctx, ev)
-          setShowWhiteboard(msg.events.length > 0)
+          if (msg.events.length > 0) setShowWhiteboard(true)
+          if (msg.final) hasWbInit.current = true
           return
         }
 

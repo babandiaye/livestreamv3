@@ -18,7 +18,10 @@ export async function GET(req: NextRequest) {
     roomJoin: true,
     canPublish: false,
     canSubscribe: true,
-    canPublishData: false,
+    // true : le recorder doit pouvoir émettre « __wb_request_init__ » pour
+    // récupérer l'historique du tableau blanc s'il démarre en cours de session
+    // (sinon l'enregistrement capture un tableau vide). Reste hidden + recorder.
+    canPublishData: true,
     hidden: true,
     recorder: true,
   })

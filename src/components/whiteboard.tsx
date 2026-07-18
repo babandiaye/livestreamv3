@@ -20,8 +20,15 @@ type WBEvent = {
   text?: string; fontSize?: number; tx?: number; ty?: number
 }
 
-type WBInit = { v: 1; type: "init"; events: WBEvent[] }
+// L'init est découpé en morceaux : un seul paquet reliable est plafonné à 15 KiB
+// (doc LiveKit), ce qui est dépassé dès ~100-150 tracés. seq/final permettent au
+// récepteur de vider le canvas au 1er morceau et de savoir quand l'historique est
+// complet. Réf. doc : https://docs.livekit.io/transport/data/packets/
+type WBInit = { v: 1; type: "init"; events: WBEvent[]; seq: number; final: boolean }
 type WBMsg = WBEvent | WBInit
+
+// ~40 événements/morceau ≈ 6 KiB, marge confortable sous la limite de 15 KiB.
+const INIT_CHUNK = 40
 
 const COLORS = ["#1a1a2e","#0065b1","#e53e3e","#2fb344","#d97706","#a855f7","#ffffff","#000000"]
 const SIZES  = [2, 5, 10, 20]
@@ -174,12 +181,23 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
   // ── Envoyer snapshot complet ──────────────────────────────────────────────
   const sendInit = useCallback(() => {
     if (readOnly) return
-    if (eventStore.current.length === 0) return
-    const init: WBInit = { v: 1, type: "init", events: eventStore.current }
-    localParticipant.publishData(
-      new TextEncoder().encode(JSON.stringify(init)),
-      { reliable: true, topic: WB_TOPIC }
-    )
+    const evs = eventStore.current
+    if (evs.length === 0) return
+    // Découpage en morceaux < 15 KiB, envoyés en ordre (reliable garantit l'ordre).
+    const total = Math.ceil(evs.length / INIT_CHUNK)
+    for (let i = 0; i < total; i++) {
+      const init: WBInit = {
+        v: 1,
+        type: "init",
+        events: evs.slice(i * INIT_CHUNK, (i + 1) * INIT_CHUNK),
+        seq: i,
+        final: i === total - 1,
+      }
+      localParticipant.publishData(
+        new TextEncoder().encode(JSON.stringify(init)),
+        { reliable: true, topic: WB_TOPIC }
+      )
+    }
   }, [readOnly, localParticipant])
 
   const requestInit = useCallback(() => {
@@ -223,10 +241,14 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
         if (!canvas) return
         const ctx = canvas.getContext("2d")!
         if (msg.type === "init") {
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          eventStore.current = [...msg.events]
-          for (const ev of msg.events) replayEvent(ctx, ev)
-          hasReceivedInit.current = true
+          // Init potentiellement multi-morceaux : le 1er (seq 0) réinitialise,
+          // les suivants s'accumulent ; « final » marque l'historique complet.
+          if (msg.seq === 0) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            eventStore.current = []
+          }
+          for (const ev of msg.events) { eventStore.current.push(ev); replayEvent(ctx, ev) }
+          if (msg.final) hasReceivedInit.current = true
           return
         }
         if (msg.type === "clear") {
