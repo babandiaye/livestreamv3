@@ -41,6 +41,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare, Track.Source.Microphone]);
 
   const [panel, setPanel] = useState<"chat" | "participants" | null>("participants");
+  const [showMore, setShowMore] = useState(false); // menu « Plus » des contrôles (mobile)
   const [showWhiteboard, setShowWhiteboard] = useState(false);
   const [shareOn, setShareOn] = useState(false);
   const [raisedHands, setRaisedHands] = useState<string[]>([]);
@@ -118,11 +119,15 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const inviteToStage = async (identity: string) => {
     setInviting(identity);
     try {
-      await fetch("/api/invite_to_stage", {
+      const res = await fetch("/api/invite_to_stage", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
         body: JSON.stringify({ identity }),
       });
+      if (!res.ok) {
+        const err = await res.text();
+        alert(`Impossible d'inviter ce participant sur scène : ${err || "erreur inconnue"}`);
+      }
     } finally { setInviting(null); }
   };
 
@@ -480,6 +485,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
       )}
 
       <div className="h-body" style={{ position: "relative" }}>
+        {panel && <div className="h-panel-backdrop" onClick={() => setPanel(null)} />}
         <div className="h-stage">
           <div className="h-main-video">
 
@@ -645,7 +651,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         )}
       </div>
 
-      <div className="h-controls">
+      <div className={`h-controls${showMore ? " more-open" : ""}`}>
         <div className="h-ctrl-left">
           <div className="h-room-info">
             <img src="/logo-unchk.png" alt="" className="h-ctrl-logo" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
@@ -679,28 +685,28 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
             <span className="h-ctrl-label">Caméra</span>
           </div>
 
-          <div className="h-ctrl-btn-wrap">
+          <div className="h-ctrl-btn-wrap h-ctrl-more">
             <button className={`h-ctrl-btn${shareOn ? " active" : ""}`} onClick={toggleShare}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 12 17 16 21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
             </button>
             <span className="h-ctrl-label">Écran</span>
           </div>
 
-          <div className="h-ctrl-btn-wrap">
+          <div className="h-ctrl-btn-wrap h-ctrl-more">
             <button className={`h-ctrl-btn${showWhiteboard ? " active" : ""}`} onClick={toggleWhiteboard}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9l6 6M15 9l-6 6"/></svg>
             </button>
             <span className="h-ctrl-label">Tableau</span>
           </div>
 
-          <div className="h-ctrl-btn-wrap">
+          <div className="h-ctrl-btn-wrap h-ctrl-more">
             <button className={`h-ctrl-btn${showEmojiPicker ? " active" : ""}`} onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
             </button>
             <span className="h-ctrl-label">Réagir</span>
           </div>
 
-          <div className="h-ctrl-btn-wrap">
+          <div className="h-ctrl-btn-wrap h-ctrl-more">
             <button className={`h-ctrl-btn${showObs ? " active" : ""}`} onClick={() => { setObsResult(null); setShowObs(true); }} title="Diffuser via OBS (RTMP/WHIP)">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="M17 10l5-3v10l-5-3"/></svg>
             </button>
@@ -721,12 +727,20 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
             <span className="h-ctrl-label">Chat</span>
           </div>
 
-          <div className="h-ctrl-btn-wrap" style={{position:"relative"}}>
+          <div className="h-ctrl-btn-wrap h-ctrl-more" style={{position:"relative"}}>
             <button className={`h-ctrl-btn${panel === "participants" ? " active" : ""}`} onClick={() => setPanel(panel === "participants" ? null : "participants")}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
               {raisedHands.length > 0 && <span className="h-badge-ctrl">{raisedHands.length}</span>}
             </button>
             <span className="h-ctrl-label">Membres</span>
+          </div>
+
+          {/* Bouton « Plus » — visible uniquement en mobile, déplie les contrôles secondaires */}
+          <div className="h-ctrl-btn-wrap h-ctrl-more-toggle">
+            <button className={`h-ctrl-btn${showMore ? " active" : ""}`} onClick={() => setShowMore(!showMore)} aria-label="Plus d'options">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+            </button>
+            <span className="h-ctrl-label">Plus</span>
           </div>
         </div>
 
@@ -937,6 +951,45 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-obs-copyrow button{padding:9px 14px;background:#1e2d3d;border:1px solid #2d3f52;border-radius:8px;color:#e2e8f0;cursor:pointer;font-family:inherit;font-size:0.8rem;font-weight:600;white-space:nowrap;}
         .h-obs-copyrow button:hover{background:#243447;}
         .h-obs-hint{font-size:0.78rem;color:#64748b;line-height:1.5;background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.18);border-radius:8px;padding:10px 12px;}
+
+        /* ===== Responsive ===== Éléments propres au mobile, masqués sur desktop.
+           Toutes les règles ci-dessous sont confinées sous media queries : au-delà
+           du breakpoint, le rendu desktop reste strictement inchangé. */
+        .h-panel-backdrop{display:none;}
+        .h-ctrl-more-toggle{display:none;}
+
+        @media (max-width:768px){
+          /* Topbar : autoriser le wrap, alléger les éléments décoratifs */
+          .h-topbar{height:auto;flex-wrap:wrap;row-gap:6px;padding:8px 12px;}
+          .h-topbar-center{display:none;}
+          .h-connected{display:none;}
+
+          /* Panneau chat/membres → tiroir superposé à droite + voile */
+          .h-panel{position:fixed;top:0;right:0;height:100dvh;width:min(320px,88vw);z-index:50;box-shadow:-4px 0 30px rgba(0,0,0,.5);}
+          .h-panel-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;}
+
+          /* Barre de contrôles : disposition centrée, labels masqués, menu « Plus » */
+          .h-controls{display:flex;justify-content:center;height:auto;padding:8px 10px;}
+          .h-ctrl-left,.h-ctrl-right{display:none;}
+          .h-ctrl-center{flex-wrap:wrap;gap:8px;}
+          .h-ctrl-label{display:none;}
+          .h-ctrl-btn{width:44px;height:44px;}
+          .h-ctrl-btn.quit{width:44px;}
+          .h-ctrl-more{display:none;}
+          .h-ctrl-more-toggle{display:flex;}
+          .h-controls.more-open .h-ctrl-more{display:flex;}
+
+          /* Vignettes réduites pour laisser respirer la vidéo principale */
+          .h-pip-tile{width:112px;height:70px;}
+          .h-tile{width:120px;height:76px;}
+          .h-emoji-picker{bottom:auto;top:60px;}
+        }
+
+        @media (max-width:480px){
+          .h-host-badge{display:none;}
+          .h-room-pill{max-width:38vw;}
+          .h-room-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        }
       `}</style>
     </div>
   );

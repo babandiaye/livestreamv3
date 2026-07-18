@@ -33,14 +33,15 @@ export async function POST(req: NextRequest) {
     process.env.LIVEKIT_API_SECRET!
   )
 
-  await roomService.createRoom({
-    name: room.roomName,
-    metadata: JSON.stringify({
-      creator_identity: moderatorEmail,
-      enable_chat: true,
-      allow_participation: false,
-    }),
+  const roomMetadata = JSON.stringify({
+    creator_identity: moderatorEmail,
+    enable_chat: true,
+    allow_participation: false,
   })
+  await roomService.createRoom({ name: room.roomName, metadata: roomMetadata })
+  // createRoom n'écrase pas les métadonnées d'une salle déjà auto-créée (vide) :
+  // on force donc creator_identity, sinon l'animateur ne peut pas inviter/exclure.
+  await roomService.updateRoomMetadata(room.roomName, roomMetadata)
 
   // Mettre à jour le statut
   await prisma.session.update({

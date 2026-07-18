@@ -268,6 +268,11 @@ export class Controller {
       name: room_name,
       metadata: JSON.stringify(metadata),
     });
+    // createRoom est un no-op si la salle existe déjà (ex. auto-créée vide parce
+    // qu'un spectateur a rejoint /watch avant le démarrage) : dans ce cas il
+    // n'écrase PAS les métadonnées. On force donc creator_identity ici, sinon
+    // inviteToStage/kick/enregistrement échouent faute de créateur identifiable.
+    await this.roomService.updateRoomMetadata(room_name, JSON.stringify(metadata));
 
     // L'animateur figure dans la liste de présence en tant que modérateur.
     const attendee: Record<string, unknown> = { isModerator: true };
@@ -337,7 +342,7 @@ export class Controller {
   async inviteToStage(session: Session, { identity }: InviteToStageParams) {
     const rooms = await this.roomService.listRooms([session.room_name]);
     if (rooms.length === 0) throw new Error("Room does not exist");
-    const creator_identity = (JSON.parse(rooms[0].metadata) as RoomMetadata).creator_identity;
+    const creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
     if (creator_identity !== session.identity) throw new Error("Only the creator can invite to stage");
 
     const participant = await this.roomService.getParticipant(session.room_name, identity);
@@ -354,7 +359,7 @@ export class Controller {
 
     const rooms = await this.roomService.listRooms([session.room_name]);
     if (rooms.length === 0) throw new Error("Room does not exist");
-    const creator_identity = (JSON.parse(rooms[0].metadata) as RoomMetadata).creator_identity;
+    const creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
     if (creator_identity !== session.identity && identity !== session.identity) {
       throw new Error("Only the creator or the participant can remove from stage");
     }

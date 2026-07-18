@@ -218,10 +218,10 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", background: "#0d1117", color: "#e6edf3", fontFamily: "'Google Sans','Segoe UI',system-ui,sans-serif" }}>
+    <div className="v-root" style={{ display: "flex", flexDirection: "column", height: "100dvh", background: "#0d1117", color: "#e6edf3", fontFamily: "'Google Sans','Segoe UI',system-ui,sans-serif" }}>
 
       {/* ── TOPBAR ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 54, background: "#161b22", borderBottom: "1px solid #21262d", flexShrink: 0 }}>
+      <div className="v-topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 54, background: "#161b22", borderBottom: "1px solid #21262d", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <img src="/logo-unchk.png" alt="UN-CHK" style={{ height: "28px", objectFit: "contain" }} onError={(e) => (e.currentTarget.style.display="none")} />
@@ -234,7 +234,7 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, color: "#3fb950" }}>
+          <div className="v-topbar-connected" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, color: "#3fb950" }}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3fb950", display: "inline-block" }} />
             Connecté
           </div>
@@ -246,14 +246,15 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
             <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#0065b1", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "white" }}>
               {(localParticipant.name ?? localParticipant.identity).charAt(0).toUpperCase()}
             </div>
-            <span style={{ fontSize: 13, fontWeight: 500, color: "#e6edf3" }}>{localParticipant.name ?? localParticipant.identity}</span>
-            <span style={{ fontSize: 11, color: "#8b949e", background: "#161b22", padding: "1px 6px", borderRadius: 4 }}>Spectateur</span>
+            <span className="v-topbar-username" style={{ fontSize: 13, fontWeight: 500, color: "#e6edf3" }}>{localParticipant.name ?? localParticipant.identity}</span>
+            <span className="v-topbar-tag" style={{ fontSize: 11, color: "#8b949e", background: "#161b22", padding: "1px 6px", borderRadius: 4 }}>Spectateur</span>
           </div>
         </div>
       </div>
 
       {/* ── BODY ── */}
-      <div style={{ display: "flex", flex: 1, overflow: "hidden", position: "relative" }}>
+      <div className="v-body" style={{ display: "flex", flex: 1, overflow: "hidden", position: "relative" }}>
+        {panel === "chat" && <div className="v-panel-backdrop" onClick={() => setPanel(null)} />}
 
         {/* Stage */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", background: "#010409" }}>
@@ -350,7 +351,7 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         </div>
 
         {/* ── PANEL CHAT — toujours monté, caché via display ── */}
-        <div style={{ width: 300, flexShrink: 0, background: "#161b22", borderLeft: "1px solid #21262d", display: panel === "chat" ? "flex" : "none", flexDirection: "column" }}>
+        <div className="v-panel" style={{ width: 300, flexShrink: 0, background: "#161b22", borderLeft: "1px solid #21262d", display: panel === "chat" ? "flex" : "none", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #21262d", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "#e6edf3" }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b949e" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -365,9 +366,9 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
       </div>
 
       {/* ── CONTROLS ── */}
-      <div style={{ background: "#161b22", borderTop: "1px solid #21262d", flexShrink: 0, padding: "10px 24px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#8b949e" }}>
+      <div className="v-controls-wrap" style={{ background: "#161b22", borderTop: "1px solid #21262d", flexShrink: 0, padding: "10px 24px" }}>
+        <div className="v-controls-grid" style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center" }}>
+          <div className="v-controls-info" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#8b949e" }}>
             <img src="/logo-unchk.png" alt="UN-CHK" style={{ height: "22px", objectFit: "contain" }} onError={(e) => (e.currentTarget.style.display="none")} />
             <span style={{ color: "#e6edf3", fontWeight: 500 }}>{room.name}</span>
             <span style={{ color: "#484f58" }}>·</span>
@@ -375,7 +376,7 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
             {participants.length}
           </div>
 
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, justifyContent: "center" }}>
+          <div className="v-controls-center" style={{ display: "flex", alignItems: "flex-start", gap: 4, justifyContent: "center" }}>
             {onStage && (
               <CtrlBtn label="Micro" active={micOn} off={!micOn}
                 onClick={() => localParticipant.setMicrophoneEnabled(!micOn, audioOptions)}
@@ -432,7 +433,7 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
               <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#3d1a1a", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
               </div>
-              <span style={{ fontSize: 11, fontWeight: 500, whiteSpace: "nowrap" }}>Quitter</span>
+              <span className="v-ctrl-label" style={{ fontSize: 11, fontWeight: 500, whiteSpace: "nowrap" }}>Quitter</span>
             </a>
           </div>
 
@@ -445,6 +446,28 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         @keyframes w-floatUp { 0%{opacity:1;transform:translateY(0) scale(1)} 50%{opacity:1;transform:translateY(-40vh) scale(1.3)} 100%{opacity:0;transform:translateY(-80vh) scale(.8)} }
         @keyframes w-spin { to{transform:rotate(360deg)} }
         .v-start-audio { position:absolute;inset:0;background:rgba(1,4,9,.8);color:#e6edf3;border:none;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px); }
+
+        /* ===== Responsive ===== Les !important ne servent qu'à battre les styles
+           inline existants, et uniquement à l'intérieur des @media → le rendu
+           desktop reste strictement inchangé au-delà du breakpoint. */
+        .v-panel-backdrop { display:none; }
+
+        @media (max-width:768px) {
+          /* Topbar : autoriser le wrap, masquer les éléments secondaires */
+          .v-topbar { height:auto !important; flex-wrap:wrap; row-gap:6px; padding:8px 12px !important; }
+          .v-topbar-connected, .v-topbar-username, .v-topbar-tag { display:none !important; }
+
+          /* Panneau chat → tiroir superposé à droite + voile */
+          .v-panel { position:fixed !important; top:0; right:0; height:100dvh !important; width:min(320px,88vw) !important; z-index:50 !important; box-shadow:-4px 0 30px rgba(0,0,0,.5); }
+          .v-panel-backdrop { display:block; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:40; }
+
+          /* Barre de contrôles : centrée, labels masqués, wrap autorisé */
+          .v-controls-wrap { padding:8px 10px !important; }
+          .v-controls-grid { display:flex !important; justify-content:center; }
+          .v-controls-info { display:none !important; }
+          .v-controls-center { flex-wrap:wrap; }
+          .v-ctrl-label { display:none !important; }
+        }
       `}</style>
     </div>
   );
@@ -464,7 +487,7 @@ function CtrlBtn({ label, icon, onClick, active, off, raised, stageActive, disab
       <div style={{ width: 44, height: 44, borderRadius: "50%", background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", color: iconColor, transition: "background .15s" }}>
         {icon}
       </div>
-      <span style={{ fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", color: labelColor }}>{label}</span>
+      <span className="v-ctrl-label" style={{ fontSize: 11, fontWeight: 500, whiteSpace: "nowrap", color: labelColor }}>{label}</span>
     </button>
   );
 }

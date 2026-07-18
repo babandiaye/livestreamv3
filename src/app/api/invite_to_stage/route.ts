@@ -8,6 +8,7 @@ export async function POST(req: Request) {
     await controller.inviteToStage(session, body as InviteToStageParams);
     return Response.json({});
   } catch (err) {
+    console.error("[invite_to_stage] échec:", err instanceof Error ? err.message : err);
     return new Response(err instanceof Error ? err.message : null, { status: 500 });
   }
 }
