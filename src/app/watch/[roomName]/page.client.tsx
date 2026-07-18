@@ -154,6 +154,18 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     }
   }, [onStage]);
 
+  // Modération à distance : le modérateur peut couper le micro de ce participant
+  // via RPC ; on coupe le micro local et on accuse réception. Réf. doc :
+  // https://docs.livekit.io/transport/data/rpc/
+  useEffect(() => {
+    const lp = room.localParticipant;
+    lp.registerRpcMethod("moderation.muteRequest", async () => {
+      await lp.setMicrophoneEnabled(false);
+      return JSON.stringify({ ok: true });
+    });
+    return () => { lp.unregisterRpcMethod("moderation.muteRequest"); };
+  }, [room]);
+
   // Réactions emoji : canal de données dédié « reactions » en LOSSY (cf. host).
   // Réf. doc : /transport/data/packets/ (délivrance lossy) et /transport/data/.
   const reactionThrottle = useRef<Map<string, number>>(new Map());

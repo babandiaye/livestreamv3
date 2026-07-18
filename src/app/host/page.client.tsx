@@ -47,6 +47,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const [shareOn, setShareOn] = useState(false);
   const [raisedHands, setRaisedHands] = useState<string[]>([]);
   const [inviting, setInviting] = useState<string | null>(null);
+  const [modToast, setModToast] = useState<string | null>(null); // retour des actions de modération (RPC)
 
   const [egressId, setEgressId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -147,6 +148,27 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
       body: JSON.stringify({ identity }),
     });
+  };
+
+  const showModToast = (msg: string) => { setModToast(msg); setTimeout(() => setModToast(null), 3000); };
+
+  // Coupe le micro d'un participant via RPC et attend son accusé de réception.
+  // Contrairement au kick (fire-and-forget côté serveur), on obtient une
+  // confirmation ou un échec explicite. Réf. doc : /transport/data/rpc/
+  const muteParticipant = async (identity: string, displayName = identity) => {
+    try {
+      const res = await localParticipant.performRpc({
+        destinationIdentity: identity,
+        method: "moderation.muteRequest",
+        payload: "",
+        responseTimeout: 5000,
+      });
+      let ok = false;
+      try { ok = JSON.parse(res)?.ok === true; } catch {}
+      showModToast(ok ? `Micro de ${displayName} coupé` : `Échec de la coupure pour ${displayName}`);
+    } catch {
+      showModToast(`${displayName} injoignable`);
+    }
   };
 
   const startRecording = async (): Promise<string | null> => {
@@ -647,6 +669,9 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
                         </button>
                       )}
                       {!isHost && meta.invited_to_stage && (
+                        <button className="h-pmute" onClick={() => muteParticipant(p.identity, p.name || p.identity)}>Couper micro</button>
+                      )}
+                      {!isHost && meta.invited_to_stage && (
                         <button className="h-premove" onClick={() => removeFromStage(p.identity)}>Retirer</button>
                       )}
                       {!isHost && (
@@ -834,6 +859,10 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         </div>
       )}
 
+      {modToast && (
+        <div className="h-mod-toast">{modToast}</div>
+      )}
+
       <style>{`
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
         .h-root{display:flex;flex-direction:column;height:100dvh;background:#0d1117;color:#e2e8f0;font-family:'Nunito','Segoe UI',system-ui,sans-serif;}
@@ -961,6 +990,9 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-obs-copyrow button{padding:9px 14px;background:#1e2d3d;border:1px solid #2d3f52;border-radius:8px;color:#e2e8f0;cursor:pointer;font-family:inherit;font-size:0.8rem;font-weight:600;white-space:nowrap;}
         .h-obs-copyrow button:hover{background:#243447;}
         .h-obs-hint{font-size:0.78rem;color:#64748b;line-height:1.5;background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.18);border-radius:8px;padding:10px 12px;}
+        .h-pmute{padding:4px 10px;background:rgba(251,191,36,.14);color:#fbbf24;border:1px solid rgba(251,191,36,.35);border-radius:5px;font-size:0.72rem;cursor:pointer;font-family:inherit;transition:background .15s;}
+        .h-pmute:hover{background:#fbbf24;color:#1a1a2e;border-color:#fbbf24;}
+        .h-mod-toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:#111827;border:1px solid #2d3f52;color:#e2e8f0;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:400;}
 
         /* ===== Responsive ===== Éléments propres au mobile, masqués sur desktop.
            Toutes les règles ci-dessous sont confinées sous media queries : au-delà
