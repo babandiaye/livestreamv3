@@ -303,7 +303,7 @@ export class Controller {
   async stopStream(session: Session) {
     const rooms = await this.roomService.listRooms([session.room_name]);
     if (rooms.length === 0) throw new Error("Room does not exist");
-    const creator_identity = (JSON.parse(rooms[0].metadata) as RoomMetadata).creator_identity;
+    const creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
     if (creator_identity !== session.identity) throw new Error("Only the creator can stop the stream");
     await this.roomService.deleteRoom(session.room_name);
   }
@@ -350,6 +350,16 @@ export class Controller {
     const metadata = this.getOrCreateParticipantMetadata(participant);
     metadata.invited_to_stage = true;
     permission.canPublish = true;
+    // Plafond volontaire (cf. incident du 16/07 : tempête de caméras étudiantes) :
+    // un spectateur monté sur scène publie micro + partage d'écran uniquement,
+    // JAMAIS sa caméra. Garantie côté serveur, en complément du bouton caméra
+    // retiré de l'interface spectateur. Réf. doc :
+    // https://docs.livekit.io/transport/media/publish/
+    permission.canPublishSources = [
+      TrackSource.MICROPHONE,
+      TrackSource.SCREEN_SHARE,
+      TrackSource.SCREEN_SHARE_AUDIO,
+    ];
 
     await this.roomService.updateParticipant(session.room_name, identity, JSON.stringify(metadata), permission);
   }
