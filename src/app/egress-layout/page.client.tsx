@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation"
 import {
   LiveKitRoom, useTracks, useParticipants,
-  VideoTrack, AudioTrack, useChat, useRoomContext,
+  VideoTrack, AudioTrack, useChat, useRoomContext, useRoomInfo,
 } from "@livekit/components-react"
 import { Track } from "livekit-client"
 import { egressRoomOptions } from "@/lib/livekit-options"
@@ -83,6 +83,7 @@ function EgressRoom() {
   ])
   const participants = useParticipants()
   const { chatMessages } = useChat()
+  const { metadata: egressRoomMeta } = useRoomInfo()
   const chatRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [showWhiteboard, setShowWhiteboard] = useState(false)
@@ -141,17 +142,19 @@ function EgressRoom() {
     return () => { room.off("dataReceived", handleData) }
   }, [room])
 
-  // Signal chat whiteboard open/close depuis l'hôte
+  // État du tableau blanc dérivé des métadonnées de room (state sync) : la vue
+  // d'enregistrement suit l'ouverture/fermeture décidée par l'animateur, et un
+  // egress démarré en cours de session voit l'état courant.
+  // Réf. doc : https://docs.livekit.io/transport/data/state/
   useEffect(() => {
-    const last = chatMessages[chatMessages.length - 1]
-    if (!last?.message) return
-    if (last.message === "__whiteboard_open__") setShowWhiteboard(true)
-    if (last.message === "__whiteboard_close__") {
-      setShowWhiteboard(false)
+    let open = false
+    try { open = JSON.parse(egressRoomMeta || "{}").whiteboard_open === true } catch {}
+    setShowWhiteboard(open)
+    if (!open) {
       const canvas = canvasRef.current
       if (canvas) canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height)
     }
-  }, [chatMessages])
+  }, [egressRoomMeta])
 
   const screenTrack = tracks.find(t => t.source === Track.Source.ScreenShare)
   const camTracks = tracks.filter(t => t.source === Track.Source.Camera)
@@ -162,9 +165,7 @@ function EgressRoom() {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
   }, [chatMessages])
 
-  const visibleMessages = chatMessages.filter(
-    m => m.message && !m.message.startsWith("__whiteboard_")
-  )
+  const visibleMessages = chatMessages.filter(m => m.message)
 
   return (
     <div style={{

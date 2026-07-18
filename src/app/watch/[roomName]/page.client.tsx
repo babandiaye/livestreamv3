@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useChat, useDataChannel } from "@livekit/components-react";
+import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useRoomInfo, useDataChannel } from "@livekit/components-react";
 import { Track, Participant, ConnectionState } from "livekit-client";
 import { TokenContext } from "@/components/token-context";
 import { Chat } from "@/components/chat";
@@ -107,7 +107,7 @@ export default function WatchPage({ roomName, serverUrl }: { roomName: string; s
 function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const authToken = useAuthToken();
   const room = useRoomContext();
-  const { chatMessages } = useChat();
+  const { metadata: liveRoomMetadata } = useRoomInfo();
   const { localParticipant } = useLocalParticipant();
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare, Track.Source.Microphone]);
@@ -190,12 +190,12 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     setShowEmojiPicker(false);
   };
 
+  // État du tableau blanc dérivé des métadonnées de room (state sync) : un
+  // spectateur qui rejoint pendant que le tableau est ouvert le voit ouvert.
+  // Réf. doc : https://docs.livekit.io/transport/data/state/
   useEffect(() => {
-    const last = chatMessages[chatMessages.length - 1]
-    if (!last?.message) return
-    if (last.message === "__whiteboard_open__") setShowWhiteboard(true)
-    if (last.message === "__whiteboard_close__") setShowWhiteboard(false)
-  }, [chatMessages])
+    try { setShowWhiteboard(JSON.parse(liveRoomMetadata || "{}").whiteboard_open === true) } catch {}
+  }, [liveRoomMetadata])
 
   const raiseHand = async () => {
     if (raisingHand || handRaised) return;

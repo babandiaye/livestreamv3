@@ -21,6 +21,7 @@ export type RoomMetadata = {
   creator_identity: string;
   enable_chat: boolean;
   allow_participation: boolean;
+  whiteboard_open?: boolean;
 };
 
 export type ParticipantMetadata = {
@@ -395,6 +396,25 @@ export class Controller {
 
   async kickParticipant(room_name: string, identity: string) {
     await this.roomService.removeParticipant(room_name, identity);
+  }
+
+  // Bascule l'état « tableau blanc ouvert » dans les métadonnées de room (source
+  // de vérité serveur, synchronisée à tous les participants — y compris les
+  // retardataires). L'autorisation créateur est vérifiée en amont dans la route
+  // via assertRoomCreator. updateRoomMetadata remplace TOUTE la chaîne : on relit
+  // et on fusionne pour préserver creator_identity/enable_chat/allow_participation.
+  // Réf. doc : https://docs.livekit.io/transport/data/state/
+  async setWhiteboardOpen(session: Session, open: boolean) {
+    const rooms = await this.roomService.listRooms([session.room_name]);
+    if (rooms.length === 0) throw new Error("Room does not exist");
+    let meta: RoomMetadata;
+    try {
+      meta = JSON.parse(rooms[0].metadata || "{}") as RoomMetadata;
+    } catch {
+      meta = {} as RoomMetadata;
+    }
+    meta.whiteboard_open = open;
+    await this.roomService.updateRoomMetadata(session.room_name, JSON.stringify(meta));
   }
 
   getOrCreateParticipantMetadata(participant: ParticipantInfo): ParticipantMetadata {

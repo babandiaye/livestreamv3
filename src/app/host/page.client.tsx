@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 
-import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useChat, useDataChannel } from "@livekit/components-react";
+import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useRoomInfo, useDataChannel } from "@livekit/components-react";
 import { Track, Participant } from "livekit-client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { TokenContext } from "@/components/token-context";
@@ -36,7 +36,7 @@ export default function HostPage({
 function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const authToken = useAuthToken();
   const room = useRoomContext();
-  const { send: sendChat } = useChat();
+  const { metadata: roomMetadata } = useRoomInfo();
   const { localParticipant } = useLocalParticipant();
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare, Track.Source.Microphone]);
@@ -112,10 +112,28 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     setShareOn(!shareOn);
   };
 
-  const toggleWhiteboard = () => {
+  // Réconciliation : l'état du tableau blanc est porté par les métadonnées de
+  // room (source de vérité serveur). On synchronise le state local dessus, y
+  // compris pour l'animateur, ce qui couvre les retardataires et le rollback.
+  // Réf. doc : https://docs.livekit.io/transport/data/state/
+  useEffect(() => {
+    try { setShowWhiteboard(JSON.parse(roomMetadata || "{}").whiteboard_open === true); } catch {}
+  }, [roomMetadata]);
+
+  const toggleWhiteboard = async () => {
     const next = !showWhiteboard;
-    setShowWhiteboard(next);
-    sendChat?.(`__whiteboard_${next ? "open" : "close"}__`);
+    setShowWhiteboard(next); // optimiste : bascule immédiate, réconciliée par les métadonnées
+    try {
+      const res = await fetch("/api/whiteboard-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ open: next }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch {
+      setShowWhiteboard(!next); // rollback en cas d'échec
+      showModToast("Impossible de basculer le tableau blanc");
+    }
   };
 
   const inviteToStage = async (identity: string) => {

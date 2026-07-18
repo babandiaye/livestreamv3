@@ -19,8 +19,7 @@ export function Chat() {
   const messages = useMemo(() => {
     const timestamps = chatMessages.map((m) => m.timestamp);
     return chatMessages.filter((m, i) =>
-      !timestamps.includes(m.timestamp, i + 1) &&
-      !m.message.startsWith("__whiteboard_")
+      !timestamps.includes(m.timestamp, i + 1)
     );
   }, [chatMessages]);
 
