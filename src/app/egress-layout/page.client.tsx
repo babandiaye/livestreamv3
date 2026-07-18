@@ -7,12 +7,13 @@ import {
 } from "@livekit/components-react"
 import { Track } from "livekit-client"
 import { egressRoomOptions } from "@/lib/livekit-options"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useMemo } from "react"
 
 type ShapeType = "rect" | "circle" | "line" | "arrow"
 type WBEvent = { v: 1; type: "draw"|"clear"|"text"|"shape"; tool?: string; shape?: ShapeType; color?: string; size?: number; filled?: boolean; x0?: number; y0?: number; x1?: number; y1?: number; text?: string; fontSize?: number; tx?: number; ty?: number }
-type WBInit  = { v: 1; type: "init"; events: WBEvent[]; seq: number; final: boolean }
-type WBMsg   = WBEvent | WBInit
+type WBInit  = { v: 1; type: "init"; events: WBEvent[]; seq: number; final: boolean; reqId?: string }
+type WBReqInit = { v: 1; type: "req-init"; reqId: string }
+type WBMsg   = WBEvent | WBInit | WBReqInit
 
 const WB_TOPIC = "wb"
 
@@ -120,17 +121,25 @@ function EgressRoom() {
   const chatRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const hasWbInit = useRef(false)
+  const currentReqId = useRef<string | null>(null)
   const [showWhiteboard, setShowWhiteboard] = useState(false)
   const room = useRoomContext()
+  // Correctif 4 : n'accepter les tracés que du créateur de la salle.
+  const creatorIdentity = useMemo(() => {
+    try { return (JSON.parse(egressRoomMeta || "{}") as { creator_identity?: string }).creator_identity }
+    catch { return undefined }
+  }, [egressRoomMeta])
 
   // Demander l'historique du tableau, puis RÉESSAYER jusqu'à réception : un
   // enregistrement démarré en cours de session doit récupérer les tracés déjà
   // présents (l'hôte peut ne pas répondre au 1er essai).
   useEffect(() => {
     const requestInit = () => {
+      const reqId = crypto.randomUUID()
+      currentReqId.current = reqId
       try {
         room.localParticipant.publishData(
-          new TextEncoder().encode("__wb_request_init__"),
+          new TextEncoder().encode(JSON.stringify({ v: 1, type: "req-init", reqId } as WBReqInit)),
           { reliable: true, topic: WB_TOPIC }
         )
       } catch {}
@@ -156,21 +165,29 @@ function EgressRoom() {
 
       try {
         const raw = new TextDecoder().decode(payload)
-        if (raw === "__wb_request_init__") return
-        const msg: WBMsg = JSON.parse(raw)
+        if (raw === "__wb_request_init__") return       // demande legacy : l'egress ne répond pas
+        const msg: any = JSON.parse(raw)
         if (!msg || msg.v !== 1) return
+        if (msg.type === "req-init") return              // l'egress ne sert jamais d'historique
         const canvas = canvasRef.current
         if (!canvas) return
         const ctx = canvas.getContext("2d")!
 
         if (msg.type === "init") {
-          // Init multi-morceaux : seq 0 réinitialise, « final » clôt la réception.
+          // N'accepter que : réponse à NOTRE demande (reqId), ou push autoritaire
+          // du créateur sans reqId (correctif 4).
+          const isResponseToMe = !!msg.reqId && msg.reqId === currentReqId.current
+          const isCreatorPush  = !msg.reqId && !!creatorIdentity && participant?.identity === creatorIdentity
+          if (!isResponseToMe && !isCreatorPush) return
           if (msg.seq === 0) ctx.clearRect(0, 0, canvas.width, canvas.height)
           for (const ev of msg.events) replayEvent(ctx, ev)
           if (msg.events.length > 0) setShowWhiteboard(true)
-          if (msg.final) hasWbInit.current = true
+          if (msg.final) { hasWbInit.current = true; currentReqId.current = null }
           return
         }
+
+        // Mutations de contenu (draw/shape/text/clear) : réservées au créateur (correctif 4).
+        if (creatorIdentity && participant?.identity !== creatorIdentity) return
 
         if (msg.type === "clear") {
           replayEvent(ctx, msg)
@@ -184,7 +201,7 @@ function EgressRoom() {
     }
     room.on("dataReceived", handleData)
     return () => { room.off("dataReceived", handleData) }
-  }, [room])
+  }, [room, creatorIdentity])
 
   // État du tableau blanc dérivé des métadonnées de room (state sync) : la vue
   // d'enregistrement suit l'ouverture/fermeture décidée par l'animateur, et un

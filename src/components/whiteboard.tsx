@@ -1,7 +1,7 @@
 "use client"
 
-import React, { useEffect, useRef, useState, useCallback } from "react"
-import { useRoomContext, useLocalParticipant } from "@livekit/components-react"
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
+import { useRoomContext, useLocalParticipant, useRoomInfo } from "@livekit/components-react"
 
 const WB_TOPIC = "wb"
 const MIN_DISTANCE = 0.003
@@ -24,11 +24,15 @@ type WBEvent = {
 // (doc LiveKit), ce qui est dépassé dès ~100-150 tracés. seq/final permettent au
 // récepteur de vider le canvas au 1er morceau et de savoir quand l'historique est
 // complet. Réf. doc : https://docs.livekit.io/transport/data/packets/
-type WBInit = { v: 1; type: "init"; events: WBEvent[]; seq: number; final: boolean }
-type WBMsg = WBEvent | WBInit
+// reqId : identifie la demande à laquelle un init répond (anti-tempête + sécurité).
+type WBInit = { v: 1; type: "init"; events: WBEvent[]; seq: number; final: boolean; reqId?: string }
+type WBReqInit = { v: 1; type: "req-init"; reqId: string }
+type WBMsg = WBEvent | WBInit | WBReqInit
 
 // ~40 événements/morceau ≈ 6 KiB, marge confortable sous la limite de 15 KiB.
 const INIT_CHUNK = 40
+// Plafond de persistance locale (localStorage ~5 Mo).
+const MAX_PERSIST = 5000
 
 const COLORS = ["#1a1a2e","#0065b1","#e53e3e","#2fb344","#d97706","#a855f7","#ffffff","#000000"]
 const SIZES  = [2, 5, 10, 20]
@@ -140,6 +144,12 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
   const batchTimer      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasReceivedInit = useRef(false)
   const undoStack       = useRef<ImageData[]>([])
+  // Synchro de l'historique entre pairs (correctifs 1-2) + persistance (3)
+  const currentReqId     = useRef<string | null>(null)                                    // notre demande d'init en cours
+  const pendingResponses = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())  // réponses planifiées (anti-tempête)
+  const servedReqs       = useRef<Map<string, number>>(new Map())                          // reqId déjà servis/annulés (purge ~30s)
+  const persistTimer     = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const storageKey       = useRef<string>("")                                              // wb:<room>:<session>
 
   const [tool,        setTool]        = useState<"pen" | "eraser">("pen")
   const [activeShape, setActiveShape] = useState<ShapeType | null>(null)
@@ -153,6 +163,13 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
 
   const room = useRoomContext()
   const { localParticipant } = useLocalParticipant()
+  const { metadata: roomMeta } = useRoomInfo()
+  // Correctif 4 : seul le créateur peut modifier le tableau. À terme, remplacer par
+  // une liste de présentateurs autorisés plutôt qu'une seule identité.
+  const creatorIdentity = useMemo(() => {
+    try { return (JSON.parse(roomMeta || "{}") as { creator_identity?: string }).creator_identity }
+    catch { return undefined }
+  }, [roomMeta])
 
   // ── Resize canvas ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -178,107 +195,223 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
     return () => ro.disconnect()
   }, [])
 
-  // ── Envoyer snapshot complet ──────────────────────────────────────────────
-  const sendInit = useCallback(() => {
-    if (readOnly) return
+  // ── Envoyer l'historique complet, chunké (< 15 KiB/paquet) ────────────────
+  // reqId présent  → réponse à une demande précise (correctif 2) ;
+  // reqId absent   → push autoritaire (réservé au créateur, ex. undo / renvoi ciblé) ;
+  // dest           → destinataires ciblés (renvoi au seul nouvel arrivant, pas de
+  //                  broadcast → pas de tempête).
+  // Plus de garde readOnly (correctif 1) : un spectateur détenteur peut resservir
+  // l'historique si l'hôte a rechargé/quitté.
+  const sendInit = useCallback((reqId?: string, dest?: string[]) => {
     const evs = eventStore.current
     if (evs.length === 0) return
-    // Découpage en morceaux < 15 KiB, envoyés en ordre (reliable garantit l'ordre).
     const total = Math.ceil(evs.length / INIT_CHUNK)
     for (let i = 0; i < total; i++) {
       const init: WBInit = {
-        v: 1,
-        type: "init",
+        v: 1, type: "init",
         events: evs.slice(i * INIT_CHUNK, (i + 1) * INIT_CHUNK),
-        seq: i,
-        final: i === total - 1,
+        seq: i, final: i === total - 1, reqId,
       }
       localParticipant.publishData(
         new TextEncoder().encode(JSON.stringify(init)),
-        { reliable: true, topic: WB_TOPIC }
+        { reliable: true, topic: WB_TOPIC, ...(dest && dest.length ? { destinationIdentities: dest } : {}) }
       )
     }
-  }, [readOnly, localParticipant])
+  }, [localParticipant])
 
   const requestInit = useCallback(() => {
+    const reqId = crypto.randomUUID()
+    currentReqId.current = reqId
     try {
       localParticipant.publishData(
-        new TextEncoder().encode("__wb_request_init__"),
+        new TextEncoder().encode(JSON.stringify({ v: 1, type: "req-init", reqId } as WBReqInit)),
         { reliable: true, topic: WB_TOPIC }
       )
     } catch {}
   }, [localParticipant])
 
-  // ── Spectateur : demander le snapshot, puis RÉESSAYER jusqu'à réception ────
-  // Un retardataire doit récupérer l'historique même si l'hôte n'était pas prêt
-  // au premier essai (métadonnées qui ouvrent le tableau chez lui, montage du
-  // canvas, course de timing). On réessaie jusqu'à recevoir l'init, pas seulement
-  // pendant 6 s — sinon le tableau reste vide pour qui rejoint après des tracés.
+  // ── Persistance locale (correctif 3) ──────────────────────────────────────
+  // Survit à un rechargement même si l'hôte est seul. Debounce 1 s (jamais à
+  // chaque segment). try/catch partout : navigation privée / quota dépassé ne
+  // doivent jamais casser le tableau.
+  const schedulePersist = useCallback(() => {
+    if (!storageKey.current || persistTimer.current) return
+    persistTimer.current = setTimeout(() => {
+      persistTimer.current = null
+      try {
+        const evs = eventStore.current
+        const toSave = evs.length > MAX_PERSIST ? evs.slice(-MAX_PERSIST) : evs
+        localStorage.setItem(storageKey.current, JSON.stringify(toSave))
+      } catch {}
+    }, 1000)
+  }, [])
+
+  const purgePersist = useCallback(() => {
+    try { if (storageKey.current) localStorage.removeItem(storageKey.current) } catch {}
+  }, [])
+
+  // ── Anti-tempête (correctif 2) ────────────────────────────────────────────
+  // À une demande d'init, on ne répond pas tout de suite : l'hôte répond vite
+  // (0-150 ms, répondeur privilégié), les spectateurs plus tard (300-1200 ms) et
+  // annulent leur réponse si un autre pair a déjà répondu au même reqId. Résultat :
+  // 1-2 réponses même avec des centaines de détenteurs (cf. incident du 16/07).
+  const scheduleInitResponse = useCallback((reqId?: string) => {
+    if (eventStore.current.length === 0) return            // rien à servir
+    const key = reqId ?? "__legacy__"
+    if (servedReqs.current.has(key) || pendingResponses.current.has(key)) return
+    const delay = readOnly ? 300 + Math.random() * 900 : Math.random() * 150
+    const timer = setTimeout(() => {
+      pendingResponses.current.delete(key)
+      servedReqs.current.set(key, Date.now())
+      const now = Date.now()
+      for (const [k, t] of servedReqs.current) if (now - t > 30000) servedReqs.current.delete(k)  // purge
+      sendInit(reqId)
+    }, delay)
+    pendingResponses.current.set(key, timer)
+  }, [readOnly, sendInit])
+
+  // ── Identifiant de session + restauration localStorage (correctif 3) ──────
+  // Clé = wb:<salle>:<session>. La session (room.getSid, différente à chaque
+  // recréation de salle) évite qu'une nouvelle réunion hérite du dessin de la
+  // précédente dans une salle réutilisée.
   useEffect(() => {
-    if (!readOnly) return
+    let cancelled = false
+    ;(async () => {
+      let sid = ""
+      try {
+        sid = typeof room.getSid === "function"
+          ? await room.getSid()
+          : ((room as unknown as { sid?: string }).sid ?? "")
+      } catch {}
+      if (cancelled || !sid) return
+      storageKey.current = `wb:${room.name}:${sid}`
+      try {
+        const saved = localStorage.getItem(storageKey.current)
+        if (saved && eventStore.current.length === 0) {
+          const evs = JSON.parse(saved) as WBEvent[]
+          if (Array.isArray(evs) && evs.length) {
+            eventStore.current = evs
+            const canvas = canvasRef.current
+            if (canvas) { const ctx = canvas.getContext("2d")!; for (const ev of evs) replayEvent(ctx, ev) }
+          }
+        }
+      } catch {}
+    })()
+    return () => { cancelled = true }
+  }, [room])
+
+  // ── Demander l'historique au montage, puis RÉESSAYER ──────────────────────
+  // Correctif 1 : plus réservé au spectateur — un HÔTE qui recharge doit aussi
+  // pouvoir récupérer l'historique d'un pair. On demande toujours au moins une
+  // fois (même si localStorage a restauré du contenu : la réponse d'un pair fait
+  // autorité), puis on relance tant qu'on n'a ni reçu d'init ni de contenu.
+  useEffect(() => {
     let attempts = 0
     const tick = () => {
-      if (hasReceivedInit.current || attempts >= 20) { clearInterval(iv); clearTimeout(first); return }
+      if (hasReceivedInit.current || eventStore.current.length > 0 || attempts >= 20) {
+        clearInterval(iv); clearTimeout(first); return
+      }
       attempts++
       requestInit()
     }
-    const first = setTimeout(tick, 600)
+    const first = setTimeout(() => requestInit(), 500)  // 1re demande inconditionnelle
     const iv = setInterval(tick, 2500)
     return () => { clearInterval(iv); clearTimeout(first) }
-  }, [readOnly, requestInit])
+  }, [requestInit])
+
+  // ── Purge à la fermeture du tableau (démontage) ───────────────────────────
+  // NB : un rechargement dur ne déclenche PAS ce cleanup → l'historique local
+  // survit pour être restauré (c'est l'effet voulu). Seule une fermeture
+  // délibérée purge.
+  useEffect(() => {
+    const pending = pendingResponses.current
+    return () => {
+      if (persistTimer.current) clearTimeout(persistTimer.current)
+      purgePersist()
+      for (const t of pending.values()) clearTimeout(t)
+      pending.clear()
+    }
+  }, [purgePersist])
 
   // ── Recevoir données LiveKit ──────────────────────────────────────────────
   useEffect(() => {
     const handleData = (payload: Uint8Array, participant: any, _kind: any, topic?: string) => {
       if (topic !== WB_TOPIC && topic !== undefined) return
       if (participant?.identity === localParticipant.identity) return
-      try {
-        const raw = new TextDecoder().decode(payload)
-        if (raw === "__wb_request_init__") { setTimeout(() => sendInit(), 200); return }
-        const msg: WBMsg = JSON.parse(raw)
-        if (!msg || msg.v !== 1) return
-        const canvas = canvasRef.current
-        if (!canvas) return
-        const ctx = canvas.getContext("2d")!
-        if (msg.type === "init") {
-          // Init potentiellement multi-morceaux : le 1er (seq 0) réinitialise,
-          // les suivants s'accumulent ; « final » marque l'historique complet.
-          if (msg.seq === 0) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height)
-            eventStore.current = []
-          }
-          for (const ev of msg.events) { eventStore.current.push(ev); replayEvent(ctx, ev) }
-          if (msg.final) hasReceivedInit.current = true
-          return
+
+      let raw = ""
+      try { raw = new TextDecoder().decode(payload) } catch { return }
+
+      // ── Demande d'historique (de n'importe quel participant) : legacy ou req-init
+      if (raw === "__wb_request_init__") { scheduleInitResponse(undefined); return }
+      let msg: any
+      try { msg = JSON.parse(raw) } catch { return }
+      if (!msg || msg.v !== 1) return
+      if (msg.type === "req-init") { scheduleInitResponse(msg.reqId); return }
+
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const ctx = canvas.getContext("2d")!
+
+      // ── Réponse d'historique (init, éventuellement multi-morceaux)
+      if (msg.type === "init") {
+        // Si un AUTRE pair répond à une demande qu'on avait planifié de servir → annuler.
+        if (msg.reqId && pendingResponses.current.has(msg.reqId)) {
+          clearTimeout(pendingResponses.current.get(msg.reqId)!)
+          pendingResponses.current.delete(msg.reqId)
+          servedReqs.current.set(msg.reqId, Date.now())
         }
-        if (msg.type === "clear") {
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          eventStore.current = []
-          return
-        }
-        replayEvent(ctx, msg as WBEvent)
-        eventStore.current.push(msg as WBEvent)
-      } catch {}
+        // N'appliquer que : (a) réponse à NOTRE demande (reqId correspond), ou
+        // (b) push autoritaire du créateur sans reqId (ex. undo). Correctif 4 : un
+        // init d'un non-créateur n'est accepté que s'il répond à notre demande.
+        const isResponseToMe = !!msg.reqId && msg.reqId === currentReqId.current
+        const isCreatorPush  = !msg.reqId && !!creatorIdentity && participant?.identity === creatorIdentity
+        if (!isResponseToMe && !isCreatorPush) return
+        if (msg.seq === 0) { ctx.clearRect(0, 0, canvas.width, canvas.height); eventStore.current = [] }
+        for (const ev of msg.events) { eventStore.current.push(ev); replayEvent(ctx, ev) }
+        if (msg.final) { hasReceivedInit.current = true; currentReqId.current = null; schedulePersist() }
+        return
+      }
+
+      // ── Mutations de contenu (draw/shape/text/clear) : RÉSERVÉES au créateur
+      //    (correctif 4). Si le créateur n'est pas encore connu (métadonnées non
+      //    chargées), on laisse passer brièvement (fail-open) pour ne pas bloquer l'hôte.
+      if (creatorIdentity && participant?.identity !== creatorIdentity) return
+
+      if (msg.type === "clear") {
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        eventStore.current = []
+        purgePersist()
+        return
+      }
+      replayEvent(ctx, msg as WBEvent)
+      eventStore.current.push(msg as WBEvent)
+      schedulePersist()
     }
 
-    // Nouveau venu : renvoyer l'historique plusieurs fois — son canvas peut ne
-    // pas être encore monté au premier envoi (ouverture pilotée par les métadonnées).
-    const handleParticipantConnected = () => {
-      setTimeout(() => sendInit(), 800)
-      setTimeout(() => sendInit(), 2500)
-      setTimeout(() => sendInit(), 5000)
+    // Nouvel arrivant : l'hôte lui renvoie l'historique de façon CIBLÉE
+    // (destinationIdentities → pas de broadcast, pas de tempête), en complément
+    // de la demande que fait l'arrivant. Seul l'hôte le fait (répondeur unique).
+    const handleParticipantConnected = (participant: any) => {
+      if (readOnly) return
+      const id = participant?.identity
+      if (!id) return
+      setTimeout(() => sendInit(undefined, [id]), 800)
+      setTimeout(() => sendInit(undefined, [id]), 2500)
     }
+
     room.on("dataReceived", handleData)
     room.on("participantConnected", handleParticipantConnected)
     return () => {
       room.off("dataReceived", handleData)
       room.off("participantConnected", handleParticipantConnected)
     }
-  }, [room, readOnly, localParticipant, sendInit])
+  }, [room, readOnly, localParticipant, sendInit, scheduleInitResponse, schedulePersist, purgePersist, creatorIdentity])
 
   // ── Broadcast ─────────────────────────────────────────────────────────────
   const broadcast = useCallback((ev: WBEvent) => {
     eventStore.current.push(ev)
+    schedulePersist()
     batchRef.current.push(ev)
     if (!batchTimer.current) {
       batchTimer.current = setTimeout(() => {
@@ -293,7 +426,7 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
         }
       }, 16)
     }
-  }, [localParticipant])
+  }, [localParticipant, schedulePersist])
 
   // ── Undo ──────────────────────────────────────────────────────────────────
   const saveUndoState = useCallback(() => {
@@ -312,8 +445,9 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
     const prev = undoStack.current.pop()!
     ctx.putImageData(prev, 0, 0)
     eventStore.current.pop()
-    sendInit()
-  }, [sendInit])
+    schedulePersist()
+    sendInit()  // push autoritaire du créateur → resynchronise les autres après annulation
+  }, [sendInit, schedulePersist])
 
   // ── getPos ────────────────────────────────────────────────────────────────
   const getPos = (e: React.PointerEvent) => {
@@ -472,6 +606,7 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
     canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height)
     eventStore.current = []
     undoStack.current  = []
+    purgePersist()  // correctif 3 : effacer tout purge aussi la persistance locale
     localParticipant.publishData(
       new TextEncoder().encode(JSON.stringify({ v: 1, type: "clear" })),
       { reliable: true, topic: WB_TOPIC }
