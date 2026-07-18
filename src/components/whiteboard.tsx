@@ -191,13 +191,22 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
     } catch {}
   }, [localParticipant])
 
-  // ── Spectateur : demander snapshot ───────────────────────────────────────
+  // ── Spectateur : demander le snapshot, puis RÉESSAYER jusqu'à réception ────
+  // Un retardataire doit récupérer l'historique même si l'hôte n'était pas prêt
+  // au premier essai (métadonnées qui ouvrent le tableau chez lui, montage du
+  // canvas, course de timing). On réessaie jusqu'à recevoir l'init, pas seulement
+  // pendant 6 s — sinon le tableau reste vide pour qui rejoint après des tracés.
   useEffect(() => {
     if (!readOnly) return
-    const t1 = setTimeout(() => { if (!hasReceivedInit.current) requestInit() }, 1000)
-    const t2 = setTimeout(() => { if (!hasReceivedInit.current) requestInit() }, 3000)
-    const t3 = setTimeout(() => { if (!hasReceivedInit.current) requestInit() }, 6000)
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
+    let attempts = 0
+    const tick = () => {
+      if (hasReceivedInit.current || attempts >= 20) { clearInterval(iv); clearTimeout(first); return }
+      attempts++
+      requestInit()
+    }
+    const first = setTimeout(tick, 600)
+    const iv = setInterval(tick, 2500)
+    return () => { clearInterval(iv); clearTimeout(first) }
   }, [readOnly, requestInit])
 
   // ── Recevoir données LiveKit ──────────────────────────────────────────────
@@ -230,7 +239,13 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
       } catch {}
     }
 
-    const handleParticipantConnected = () => { setTimeout(() => sendInit(), 500) }
+    // Nouveau venu : renvoyer l'historique plusieurs fois — son canvas peut ne
+    // pas être encore monté au premier envoi (ouverture pilotée par les métadonnées).
+    const handleParticipantConnected = () => {
+      setTimeout(() => sendInit(), 800)
+      setTimeout(() => sendInit(), 2500)
+      setTimeout(() => sendInit(), 5000)
+    }
     room.on("dataReceived", handleData)
     room.on("participantConnected", handleParticipantConnected)
     return () => {
