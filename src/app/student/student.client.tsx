@@ -6,6 +6,7 @@ import Footer from "@/components/layout/Footer"
 import Pagination from "@/components/ui/Pagination"
 import { SessionBadge } from "@/components/ui/Badge"
 import RecordingList from "@/components/ui/RecordingList"
+import { User, Calendar, Clapperboard, Circle, RefreshCw, X } from "@/components/ui/icons"
 import type { Room, Role } from "@/types"
 import { PAGE_SIZE } from "@/types"
 
@@ -21,6 +22,10 @@ const IconVideo = () => (
     <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
   </svg>
 )
+
+// Styles partagés « icône + texte ».
+const metaSpan = { display: "inline-flex", alignItems: "center", gap: 4 } as const
+const iconBtn = { display: "inline-flex", alignItems: "center", gap: 6 } as const
 
 const NAV_GROUPS = [
   {
@@ -113,24 +118,24 @@ export default function StudentClient({
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ flex: 1, padding: "24px 28px" }}>
+        <div className="dash-content" style={{ flex: 1, padding: "24px 28px" }}>
 
           {/* ── SESSIONS ── */}
           {nav === "rooms" && (
-            <div style={{ display: "flex", gap: 20 }}>
-              <div style={{ flex: selectedRoom ? "0 0 380px" : 1, minWidth: 0 }}>
+            <div className="dash-cols" style={{ display: "flex", gap: 20 }}>
+              <div className="dash-col-list" style={{ flex: selectedRoom ? "0 0 380px" : 1, minWidth: 0 }}>
 
                 {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <div className="dash-header" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                   <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>Mes sessions</h2>
                   <span style={{ background: "#e8f4ff", color: "#0065b1", fontSize: 13, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>
                     {rooms.length}
                   </span>
                   <button
                     onClick={fetchRooms}
-                    style={{ marginLeft: 4, padding: "4px 10px", background: "white", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 12, color: "#6b7280", cursor: "pointer", fontFamily: "inherit" }}
+                    style={{ ...iconBtn, marginLeft: 4, padding: "4px 10px", background: "white", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 12, color: "#6b7280", cursor: "pointer", fontFamily: "inherit" }}
                   >
-                    ↻ Actualiser
+                    <RefreshCw size={13} /> Actualiser
                   </button>
                 </div>
 
@@ -158,9 +163,9 @@ export default function StudentClient({
                         <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 6 }}>{room.description}</div>
                       )}
                       <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, marginBottom: 8 }}>
-                        {room.creator && <span>👤 {room.creator.name}</span>}
-                        <span>📅 {new Date(room.createdAt).toLocaleDateString("fr-FR")}</span>
-                        {room.recordings.length > 0 && <span>🎬 {room.recordings.length} enreg.</span>}
+                        {room.creator && <span style={metaSpan}><User size={13} /> {room.creator.name}</span>}
+                        <span style={metaSpan}><Calendar size={13} /> {new Date(room.createdAt).toLocaleDateString("fr-FR")}</span>
+                        {room.recordings.length > 0 && <span style={metaSpan}><Clapperboard size={13} /> {room.recordings.length} enreg.</span>}
                       </div>
 
                       {room.status !== "ENDED" && (
@@ -168,6 +173,7 @@ export default function StudentClient({
                           onClick={(e) => { e.stopPropagation(); joinSession(room) }}
                           disabled={joining}
                           style={{
+                            ...iconBtn,
                             padding: "4px 14px",
                             background: room.status === "LIVE" ? "#16a34a" : "#0065b1",
                             color: "white",
@@ -180,7 +186,7 @@ export default function StudentClient({
                             opacity: joining ? 0.6 : 1,
                           }}
                         >
-                          {joining ? "Connexion…" : room.status === "LIVE" ? "● Rejoindre en direct" : "Rejoindre"}
+                          {joining ? "Connexion…" : room.status === "LIVE" ? <><Circle size={9} fill="currentColor" strokeWidth={0} /> Rejoindre en direct</> : "Rejoindre"}
                         </button>
                       )}
                     </div>
@@ -194,7 +200,7 @@ export default function StudentClient({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                     <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#1a1a2e" }}>{selectedRoom.title}</h2>
-                    <button onClick={() => setSelectedRoom(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af" }}>✕</button>
+                    <button aria-label="Fermer" onClick={() => setSelectedRoom(null)} style={{ display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer", color: "#9ca3af" }}><X size={18} /></button>
                   </div>
 
                   {selectedRoom.description && (
@@ -206,6 +212,7 @@ export default function StudentClient({
                       onClick={() => joinSession(selectedRoom)}
                       disabled={joining}
                       style={{
+                        ...iconBtn,
                         marginBottom: 16,
                         padding: "10px 24px",
                         background: selectedRoom.status === "LIVE" ? "#16a34a" : "#0065b1",
@@ -219,7 +226,7 @@ export default function StudentClient({
                         opacity: joining ? 0.6 : 1,
                       }}
                     >
-                      {joining ? "Connexion…" : selectedRoom.status === "LIVE" ? "● Rejoindre la session en direct" : "Rejoindre la session"}
+                      {joining ? "Connexion…" : selectedRoom.status === "LIVE" ? <><Circle size={10} fill="currentColor" strokeWidth={0} /> Rejoindre la session en direct</> : "Rejoindre la session"}
                     </button>
                   )}
 

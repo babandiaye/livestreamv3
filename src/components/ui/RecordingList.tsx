@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { RecordingBadge } from "./Badge"
+import { Play, Download, X, Clapperboard, Trash2 } from "@/components/ui/icons"
 import { formatDuration, formatSize } from "@/types"
 import type { Recording } from "@/types"
 
@@ -95,22 +96,22 @@ export default function RecordingList({
             style={{ width: "100%", maxWidth: 900, background: "#1a1a2e", borderRadius: 12, overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,.7)" }}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #2d3748" }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                🎬 {playing.filename}
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                <Clapperboard size={16} /> {playing.filename}
               </span>
               <div style={{ display: "flex", gap: 8, flexShrink: 0, marginLeft: 12 }}>
                 <button
                   onClick={() => handleDownload(playing)}
                   disabled={resolving === playing.id}
-                  style={{ padding: "4px 12px", background: "#2d3748", color: "#e2e8f0", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "none", fontFamily: "inherit", fontWeight: 500 }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", background: "#2d3748", color: "#e2e8f0", borderRadius: 6, fontSize: 12, cursor: "pointer", border: "none", fontFamily: "inherit", fontWeight: 500 }}
                 >
-                  ⬇ Télécharger
+                  <Download size={14} /> Télécharger
                 </button>
                 <button
                   onClick={() => { setPlaying(null); setPlayUrl(null) }}
-                  style={{ padding: "4px 12px", background: "#dc2626", color: "white", border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", background: "#dc2626", color: "white", border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}
                 >
-                  ✕ Fermer
+                  <X size={14} /> Fermer
                 </button>
               </div>
             </div>
@@ -133,6 +134,7 @@ export default function RecordingList({
       <div>
         {recordings.map((rec) => (
           <div
+            className="dash-row"
             key={rec.id}
             style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #f0f7ff", gap: 14 }}
           >
@@ -168,29 +170,31 @@ export default function RecordingList({
               </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <div className="dash-actions" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
               <RecordingBadge status={rec.status} />
               {rec.status === "READY" && (
                 <>
                   <button onClick={() => openPlayer(rec)} style={btn("#0065b1", "white")}>
-                    ▶ Voir
+                    <Play size={14} /> Voir
                   </button>
                   <button
                     onClick={() => handleDownload(rec)}
                     disabled={resolving === rec.id}
                     style={btn("#f3f4f6", "#374151")}
                   >
-                    {resolving === rec.id ? "…" : "⬇ Télécharger"}
+                    {resolving === rec.id ? "…" : <><Download size={14} /> Télécharger</>}
                   </button>
                 </>
               )}
               {canDelete && (
                 <button
+                  aria-label="Supprimer"
+                  title="Supprimer"
                   onClick={() => handleDelete(rec)}
                   disabled={deleting === rec.id}
                   style={btn("#fee2e2", "#dc2626")}
                 >
-                  {deleting === rec.id ? "…" : "Supprimer"}
+                  {deleting === rec.id ? "…" : <Trash2 size={15} />}
                 </button>
               )}
             </div>
@@ -203,6 +207,9 @@ export default function RecordingList({
 
 function btn(bg: string, color: string) {
   return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
     padding: "5px 12px",
     background: bg,
     color,

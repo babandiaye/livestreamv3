@@ -5,6 +5,7 @@ import Sidebar from "@/components/layout/Sidebar"
 import Footer from "@/components/layout/Footer"
 import Avatar from "@/components/ui/Avatar"
 import RoomIcon from "@/components/ui/RoomIcon"
+import { Play, Link, Download, Upload, RefreshCw, X, User, Users, Calendar, Mail, Check, Clapperboard, Trash2 } from "@/components/ui/icons"
 import Pagination from "@/components/ui/Pagination"
 import { SessionBadge, RoleBadge } from "@/components/ui/Badge"
 import RecordingList from "@/components/ui/RecordingList"
@@ -39,6 +40,11 @@ const IconActivity = () => (
     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
   </svg>
 )
+
+// Style partagé pour une métadonnée « icône + texte » alignée dans une ligne d'infos.
+const metaSpan = { display: "inline-flex", alignItems: "center", gap: 4 } as const
+// Style partagé pour un bouton « icône + libellé ».
+const iconBtn = { display: "inline-flex", alignItems: "center", gap: 6 } as const
 
 const NAV_GROUPS = [
   {
@@ -263,15 +269,15 @@ export default function AdminClient({
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ flex: 1, padding: "24px 28px" }}>
+        <div className="dash-content" style={{ flex: 1, padding: "24px 28px" }}>
 
           {/* ── SALLES ── */}
           {nav === "rooms" && (
-            <div style={{ display: "flex", gap: 20 }}>
-              <div style={{ flex: selectedRoom ? "0 0 380px" : 1, minWidth: 0 }}>
+            <div className="dash-cols" style={{ display: "flex", gap: 20 }}>
+              <div className="dash-col-list" style={{ flex: selectedRoom ? "0 0 380px" : 1, minWidth: 0 }}>
 
                 {/* Header + bouton créer */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <div className="dash-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>Salles</h2>
                     <span style={{ background: "#e8f4ff", color: "#0065b1", fontSize: 13, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>
@@ -302,7 +308,7 @@ export default function AdminClient({
                       placeholder="Description (optionnel)"
                       style={{ width: "100%", padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 7, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginTop: 8 }}
                     />
-                    <div style={{ display: "flex", gap: 20, marginTop: 12 }}>
+                    <div style={{ display: "flex", gap: 20, marginTop: 12, flexWrap: "wrap" }}>
                       <ToggleRow label="Chat" desc="" checked={chatEnabled} onChange={setChatEnabled} />
                       <ToggleRow label="Participation" desc="" checked={participationEnabled} onChange={setParticipationEnabled} />
                     </div>
@@ -328,6 +334,7 @@ export default function AdminClient({
                 <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
                   {loading ? <Spinner /> : pagedRooms.length === 0 ? <Empty text="Aucune salle" /> : pagedRooms.map((room) => (
                     <div
+                      className="dash-row"
                       key={room.id}
                       onClick={() => { setSelectedRoom(room); setRoomSubTab("enroll") }}
                       style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: "1px solid #f0f7ff", cursor: "pointer", background: selectedRoom?.id === room.id ? "#f0f7ff" : "white", transition: "background 0.1s" }}
@@ -336,29 +343,31 @@ export default function AdminClient({
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.title}</div>
                         <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, marginTop: 3, flexWrap: "wrap" }}>
-                          <span>👤 {room.creator?.name}</span>
-                          <span>📋 {room.enrollments ?? 0} enrôlés</span>
-                          <span>🎬 {room.recordings.length} enreg.</span>
+                          <span style={metaSpan}><User size={13} /> {room.creator?.name}</span>
+                          <span style={metaSpan}><Users size={13} /> {room.enrollments ?? 0} enrôlés</span>
+                          <span style={metaSpan}><Clapperboard size={13} /> {room.recordings.length} enreg.</span>
                         </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <div className="dash-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                         <button
                           onClick={(e) => { e.stopPropagation(); startMeeting(room) }}
-                          style={{ padding: "5px 12px", background: "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ ...iconBtn, padding: "5px 12px", background: "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          ▶ Démarrer
+                          <Play size={15} /> Démarrer
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); copyLink(room.roomName) }}
-                          style={{ padding: "5px 12px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ ...iconBtn, padding: "5px 12px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          🔗 Lien
+                          <Link size={15} /> Lien
                         </button>
                         <button
+                          aria-label="Supprimer"
+                          title="Supprimer"
                           onClick={(e) => { e.stopPropagation(); deleteRoom(room.id) }}
-                          style={{ padding: "5px 12px", background: "white", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "6px", background: "white", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          🗑 Supprimer
+                          <Trash2 size={15} />
                         </button>
                         <SessionBadge status={room.status} />
                       </div>
@@ -373,7 +382,7 @@ export default function AdminClient({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                     <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#1a1a2e" }}>{selectedRoom.title}</h2>
-                    <button onClick={() => setSelectedRoom(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af" }}>✕</button>
+                    <button aria-label="Fermer" onClick={() => setSelectedRoom(null)} style={{ display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer", color: "#9ca3af" }}><X size={18} /></button>
                   </div>
                   <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
                     {(["enroll", "settings"] as const).map((t) => (
@@ -411,16 +420,16 @@ export default function AdminClient({
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <a
                     href="/api/admin/enroll-csv-template"
-                    style={{ padding: "7px 14px", background: "#f3f4f6", color: "#374151", border: "1px solid #e2e8f0", borderRadius: 7, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", textDecoration: "none" }}
+                    style={{ ...iconBtn, padding: "7px 14px", background: "#f3f4f6", color: "#374151", border: "1px solid #e2e8f0", borderRadius: 7, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", textDecoration: "none" }}
                   >
-                    ⬇ Modèle CSV
+                    <Download size={15} /> Modèle CSV
                   </a>
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={importing}
-                    style={{ padding: "7px 14px", background: "#0065b1", color: "white", border: "none", borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: importing ? "default" : "pointer", fontFamily: "inherit", opacity: importing ? 0.6 : 1 }}
+                    style={{ ...iconBtn, padding: "7px 14px", background: "#0065b1", color: "white", border: "none", borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: importing ? "default" : "pointer", fontFamily: "inherit", opacity: importing ? 0.6 : 1 }}
                   >
-                    {importing ? "Import…" : "⬆ Importer CSV"}
+                    {importing ? "Import…" : <><Upload size={15} /> Importer CSV</>}
                   </button>
                   <input
                     ref={fileInputRef}
@@ -430,6 +439,7 @@ export default function AdminClient({
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) importCsv(f); e.target.value = "" }}
                   />
                   <input
+                    className="dash-search"
                     value={userSearch}
                     onChange={(e) => { setUserSearch(e.target.value); setUserPage(1) }}
                     placeholder="Rechercher…"
@@ -440,8 +450,8 @@ export default function AdminClient({
 
               {importResult && (
                 <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#065f46", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                  <span>✓ Import terminé — <strong>{importResult.created}</strong> créé(s), {importResult.skipped} déjà existant(s) sur {importResult.total} ligne(s) valide(s).</span>
-                  <button onClick={() => setImportResult(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#065f46", fontSize: 16, lineHeight: 1 }}>✕</button>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Check size={16} /> <span>Import terminé — <strong>{importResult.created}</strong> créé(s), {importResult.skipped} déjà existant(s) sur {importResult.total} ligne(s) valide(s).</span></span>
+                  <button aria-label="Fermer" onClick={() => setImportResult(null)} style={{ display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer", color: "#065f46" }}><X size={15} /></button>
                 </div>
               )}
               <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
@@ -488,6 +498,7 @@ export default function AdminClient({
                     </div>
                     {pagedUsers.map((u) => (
                       <div
+                        className="dash-row"
                         key={u.id}
                         style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: "1px solid #f0f7ff", background: selectedUsers.has(u.id) ? "#f0f7ff" : "white" }}
                       >
@@ -501,12 +512,12 @@ export default function AdminClient({
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
                           <div style={{ fontSize: 12, color: "#9ca3af", display: "flex", gap: 12, marginTop: 3, flexWrap: "wrap" }}>
-                            <span>✉️ {u.email}</span>
-                            <span>🎬 {u.sessionCount} sessions</span>
-                            <span>📅 {new Date(u.createdAt).toLocaleDateString("fr-FR")}</span>
+                            <span style={metaSpan}><Mail size={13} /> {u.email}</span>
+                            <span style={metaSpan}><Clapperboard size={13} /> {u.sessionCount} sessions</span>
+                            <span style={metaSpan}><Calendar size={13} /> {new Date(u.createdAt).toLocaleDateString("fr-FR")}</span>
                           </div>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                        <div className="dash-actions" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                           <RoleBadge role={u.role} />
                           <select
                             value={u.role}

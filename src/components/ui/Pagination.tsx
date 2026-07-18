@@ -88,6 +88,7 @@ function PageBtn({
 }) {
   return (
     <button
+      className="dash-page-btn"
       onClick={onClick}
       disabled={disabled}
       style={{

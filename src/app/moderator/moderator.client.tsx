@@ -5,6 +5,7 @@ import Sidebar from "@/components/layout/Sidebar"
 import Footer from "@/components/layout/Footer"
 import Pagination from "@/components/ui/Pagination"
 import RoomIcon from "@/components/ui/RoomIcon"
+import { Play, Link, X, Trash2 } from "@/components/ui/icons"
 import { SessionBadge } from "@/components/ui/Badge"
 import RecordingList from "@/components/ui/RecordingList"
 import EnrollPanel from "@/components/ui/EnrollPanel"
@@ -24,6 +25,9 @@ const IconVideo = () => (
     <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
   </svg>
 )
+
+// Style partagé pour un bouton « icône + libellé ».
+const iconBtn = { display: "inline-flex", alignItems: "center", gap: 6 } as const
 
 const NAV_GROUPS = [
   {
@@ -139,15 +143,15 @@ export default function ModeratorClient({
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ flex: 1, padding: "24px 28px" }}>
+        <div className="dash-content" style={{ flex: 1, padding: "24px 28px" }}>
 
           {/* ── SALLES ── */}
           {nav === "rooms" && (
-            <div style={{ display: "flex", gap: 20 }}>
-              <div style={{ flex: selectedRoom ? "0 0 380px" : 1, minWidth: 0 }}>
+            <div className="dash-cols" style={{ display: "flex", gap: 20 }}>
+              <div className="dash-col-list" style={{ flex: selectedRoom ? "0 0 380px" : 1, minWidth: 0 }}>
 
                 {/* Header + bouton créer */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <div className="dash-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>Mes salles</h2>
                     <span style={{ background: "#e8f4ff", color: "#0065b1", fontSize: 13, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>
@@ -204,6 +208,7 @@ export default function ModeratorClient({
                 <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
                   {loading ? <Spinner /> : pagedRooms.length === 0 ? <Empty text="Aucune salle" /> : pagedRooms.map((room) => (
                     <div
+                      className="dash-row"
                       key={room.id}
                       onClick={() => { setSelectedRoom(room); setRoomSubTab("enroll") }}
                       style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: "1px solid #f0f7ff", cursor: "pointer", background: selectedRoom?.id === room.id ? "#f0f7ff" : "white", transition: "background 0.1s" }}
@@ -215,24 +220,26 @@ export default function ModeratorClient({
                           {new Date(room.createdAt).toLocaleDateString("fr-FR")}
                         </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <div className="dash-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                         <button
                           onClick={(e) => { e.stopPropagation(); startMeeting(room) }}
-                          style={{ padding: "5px 12px", background: "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ ...iconBtn, padding: "5px 12px", background: "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          ▶ Démarrer
+                          <Play size={15} /> Démarrer
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); copyLink(room.roomName) }}
-                          style={{ padding: "5px 12px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ ...iconBtn, padding: "5px 12px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          🔗 Lien
+                          <Link size={15} /> Lien
                         </button>
                         <button
+                          aria-label="Supprimer"
+                          title="Supprimer"
                           onClick={(e) => { e.stopPropagation(); deleteRoom(room.id) }}
-                          style={{ padding: "5px 12px", background: "white", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "6px", background: "white", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          🗑 Supprimer
+                          <Trash2 size={15} />
                         </button>
                         <SessionBadge status={room.status} />
                       </div>
@@ -247,7 +254,7 @@ export default function ModeratorClient({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                     <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#1a1a2e" }}>{selectedRoom.title}</h2>
-                    <button onClick={() => setSelectedRoom(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af" }}>✕</button>
+                    <button aria-label="Fermer" onClick={() => setSelectedRoom(null)} style={{ display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer", color: "#9ca3af" }}><X size={18} /></button>
                   </div>
                   <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
                     {(["enroll", "settings"] as const).map((t) => (

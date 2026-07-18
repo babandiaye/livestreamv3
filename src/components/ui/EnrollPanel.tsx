@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import Avatar from "./Avatar"
 import Pagination from "./Pagination"
+import { Check } from "@/components/ui/icons"
 import type { Enrollment, SearchUser, ImportResult } from "@/types"
 import { PAGE_SIZE } from "@/types"
 
@@ -237,8 +238,8 @@ export default function EnrollPanel({ sessionId }: EnrollPanelProps) {
             </button>
           )}
           {csvResult && (
-            <div style={{ marginTop: 12, padding: 12, background: "#dcfce7", borderRadius: 8, fontSize: 14, color: "#15803d" }}>
-              ✓ Import terminé — {csvResult.summary.enrolled} enrôlés, {csvResult.summary.created} créés, {csvResult.summary.skipped} ignorés
+            <div style={{ marginTop: 12, padding: 12, background: "#dcfce7", borderRadius: 8, fontSize: 14, color: "#15803d", display: "flex", alignItems: "center", gap: 6 }}>
+              <Check size={16} /> Import terminé — {csvResult.summary.enrolled} enrôlés, {csvResult.summary.created} créés, {csvResult.summary.skipped} ignorés
             </div>
           )}
           {csvError && (

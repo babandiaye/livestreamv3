@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import Image from "next/image"
 import { signOut } from "next-auth/react"
 import type { Role } from "@/types"
@@ -41,20 +42,46 @@ function initials(name: string) {
 
 export default function Sidebar({ user, nav, onNav, groups }: SidebarProps) {
   const userName = user.name ?? user.email ?? "Utilisateur"
+  const [open, setOpen] = useState(false)
+
+  // Sur mobile, sélectionner un élément referme le tiroir.
+  const handleNav = (key: string) => {
+    onNav(key)
+    setOpen(false)
+  }
 
   return (
-    <aside style={{
-      width: 240,
-      background: "white",
-      borderRight: "1px solid #e8f0fe",
-      display: "flex",
-      flexDirection: "column",
-      height: "100vh",
-      position: "sticky",
-      top: 0,
-      flexShrink: 0,
-      zIndex: 30,
-    }}>
+    <>
+      {/* Bouton hamburger (mobile uniquement, révélé par CSS sous 768px) */}
+      <button
+        className="dash-hamburger"
+        aria-label="Ouvrir le menu"
+        onClick={() => setOpen(true)}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+
+      {/* Voile (mobile, uniquement quand le tiroir est ouvert) */}
+      {open && <div className="dash-backdrop" onClick={() => setOpen(false)} />}
+
+      <aside
+        className={`dash-sidebar${open ? " dash-sidebar-open" : ""}`}
+        style={{
+          width: 240,
+          background: "white",
+          borderRight: "1px solid #e8f0fe",
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          position: "sticky",
+          top: 0,
+          flexShrink: 0,
+          zIndex: 30,
+        }}>
       {/* Logo */}
       <div style={{ padding: "20px 16px 16px", borderBottom: "1px solid #f0f7ff", display: "flex", alignItems: "center", gap: 10 }}>
         <Image src="/logo-unchk.png" alt="UN-CHK" width={36} height={36} style={{ objectFit: "contain" }} />
@@ -84,7 +111,7 @@ export default function Sidebar({ user, nav, onNav, groups }: SidebarProps) {
               return (
                 <button
                   key={item.key}
-                  onClick={() => onNav(item.key)}
+                  onClick={() => handleNav(item.key)}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -176,5 +203,6 @@ export default function Sidebar({ user, nav, onNav, groups }: SidebarProps) {
         </button>
       </div>
     </aside>
+    </>
   )
 }

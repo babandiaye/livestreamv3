@@ -1,5 +1,6 @@
 "use client"
 
+import { Circle, Clock, X } from "@/components/ui/icons"
 import type { SessionStatus, RecordingStatus, Role } from "@/types"
 
 const SESSION_BADGE: Record<SessionStatus, { label: string; bg: string; color: string }> = {
@@ -12,6 +13,9 @@ export function SessionBadge({ status }: { status: SessionStatus }) {
   const { label, bg, color } = SESSION_BADGE[status] ?? SESSION_BADGE.SCHEDULED
   return (
     <span style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 4,
       padding: "2px 9px",
       borderRadius: 20,
       fontSize: 12,
@@ -20,7 +24,7 @@ export function SessionBadge({ status }: { status: SessionStatus }) {
       color,
       whiteSpace: "nowrap",
     }}>
-      {status === "LIVE" && <span style={{ marginRight: 4 }}>●</span>}
+      {status === "LIVE" && <Circle size={7} fill="currentColor" strokeWidth={0} />}
       {label}
     </span>
   )
@@ -36,6 +40,9 @@ export function RecordingBadge({ status }: { status: RecordingStatus }) {
   const { label, bg, color } = RECORDING_BADGE[status] ?? RECORDING_BADGE.PROCESSING
   return (
     <span style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 4,
       padding: "2px 9px",
       borderRadius: 20,
       fontSize: 12,
@@ -44,8 +51,8 @@ export function RecordingBadge({ status }: { status: RecordingStatus }) {
       color,
       whiteSpace: "nowrap",
     }}>
-      {status === "PROCESSING" && <span style={{ marginRight: 4 }}>⏳</span>}
-      {status === "FAILED"     && <span style={{ marginRight: 4 }}>✕</span>}
+      {status === "PROCESSING" && <Clock size={12} />}
+      {status === "FAILED"     && <X size={12} />}
       {label}
     </span>
   )
