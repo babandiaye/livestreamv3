@@ -6,6 +6,7 @@ import { Track, Participant, ConnectionState } from "livekit-client";
 import { TokenContext } from "@/components/token-context";
 import { Chat } from "@/components/chat";
 import { JoinStreamResponse, ParticipantMetadata, RoomMetadata } from "@/lib/controller";
+import { viewerRoomOptions } from "@/lib/livekit-options";
 import { useAuthToken } from "@/components/token-context";
 import dynamic from "next/dynamic";
 const Whiteboard = dynamic(() => import("@/components/whiteboard"), { ssr: false });
@@ -96,7 +97,7 @@ export default function WatchPage({ roomName, serverUrl }: { roomName: string; s
 
   return (
     <TokenContext.Provider value={session.authToken}>
-      <LiveKitRoom serverUrl={serverUrl} token={session.roomToken} connect={true} style={{ height: "100dvh" }}>
+      <LiveKitRoom serverUrl={serverUrl} token={session.roomToken} connect={true} options={viewerRoomOptions} style={{ height: "100dvh" }}>
         <ViewerRoom returnUrl={returnUrl} />
       </LiveKitRoom>
     </TokenContext.Provider>

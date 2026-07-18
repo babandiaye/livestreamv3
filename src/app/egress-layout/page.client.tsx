@@ -6,6 +6,7 @@ import {
   VideoTrack, AudioTrack, useChat, useRoomContext,
 } from "@livekit/components-react"
 import { Track } from "livekit-client"
+import { egressRoomOptions } from "@/lib/livekit-options"
 import { useEffect, useRef, useState } from "react"
 
 type WBEvent = { v: 1; type: "draw"|"clear"|"text"; tool?: string; color?: string; size?: number; x0?: number; y0?: number; x1?: number; y1?: number; text?: string; fontSize?: number; tx?: number; ty?: number }
@@ -66,6 +67,7 @@ export default function EgressLayoutClient() {
       token={token}
       serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL!}
       connect={true}
+      options={egressRoomOptions}
       style={{ width: "1920px", height: "1080px", background: "#0d1117" }}
     >
       <EgressRoom />

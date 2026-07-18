@@ -8,6 +8,7 @@ import { TokenContext } from "@/components/token-context";
 import { Chat } from "@/components/chat";
 import StreamingDialog from "@/components/streaming-dialog";
 import { ParticipantMetadata } from "@/lib/controller";
+import { publisherRoomOptions } from "@/lib/livekit-options";
 import { useAuthToken } from "@/components/token-context";
 import dynamic from "next/dynamic";
 const Whiteboard = dynamic(() => import("@/components/whiteboard"), { ssr: false });
@@ -25,7 +26,7 @@ export default function HostPage({
 }) {
   return (
     <TokenContext.Provider value={authToken}>
-      <LiveKitRoom serverUrl={serverUrl} token={roomToken} connect={true} style={{ height: "100dvh" }}>
+      <LiveKitRoom serverUrl={serverUrl} token={roomToken} connect={true} options={publisherRoomOptions} style={{ height: "100dvh" }}>
         <HostRoom returnUrl={returnUrl} />
       </LiveKitRoom>
     </TokenContext.Provider>
