@@ -20,7 +20,6 @@ export function Chat() {
     const timestamps = chatMessages.map((m) => m.timestamp);
     return chatMessages.filter((m, i) =>
       !timestamps.includes(m.timestamp, i + 1) &&
-      !m.message.startsWith("__emoji__") &&
       !m.message.startsWith("__whiteboard_")
     );
   }, [chatMessages]);

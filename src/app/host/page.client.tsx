@@ -1,9 +1,9 @@
 "use client";
 import React from "react";
 
-import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useChat } from "@livekit/components-react";
+import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useChat, useDataChannel } from "@livekit/components-react";
 import { Track, Participant } from "livekit-client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { TokenContext } from "@/components/token-context";
 import { Chat } from "@/components/chat";
 import StreamingDialog from "@/components/streaming-dialog";
@@ -36,7 +36,7 @@ export default function HostPage({
 function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const authToken = useAuthToken();
   const room = useRoomContext();
-  const { send: sendChat, chatMessages } = useChat();
+  const { send: sendChat } = useChat();
   const { localParticipant } = useLocalParticipant();
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare, Track.Source.Microphone]);
@@ -336,22 +336,31 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     // et arrêter proprement
   };
 
+  // Réactions emoji : canal de données dédié « reactions » en LOSSY. Une réaction
+  // perdue est sans conséquence — la livraison garantie du chat serait du gaspillage.
+  // Réf. doc : /transport/data/packets/ (délivrance lossy) et /transport/data/.
+  const reactionThrottle = useRef<Map<string, number>>(new Map());
+  const showFloatingEmoji = useCallback((emoji: string) => {
+    const id = Date.now() + Math.random();
+    const x = 20 + Math.random() * 60;
+    setFloatingEmojis(prev => [...prev, { id, emoji, x }]);
+    setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 3000);
+  }, []);
+
+  const { send: sendReaction } = useDataChannel("reactions", (msg) => {
+    // Throttle ~1 emoji/s/identity contre le spam
+    const from = msg.from?.identity ?? "?";
+    const now = Date.now();
+    if (now - (reactionThrottle.current.get(from) ?? 0) < 1000) return;
+    reactionThrottle.current.set(from, now);
+    try { showFloatingEmoji(new TextDecoder().decode(msg.payload)); } catch {}
+  });
+
   const launchEmoji = (emoji: string) => {
-    sendChat?.(`__emoji__${emoji}`);
+    try { sendReaction?.(new TextEncoder().encode(emoji), { reliable: false }); } catch {}
+    showFloatingEmoji(emoji); // l'émetteur voit sa propre réaction (le SFU ne la lui renvoie pas)
     setShowEmojiPicker(false);
   };
-
-  const lastMsgTs = chatMessages[chatMessages.length - 1]?.timestamp;
-  React.useEffect(() => {
-    const last = chatMessages[chatMessages.length - 1];
-    if (last?.message?.startsWith("__emoji__")) {
-      const emoji = last.message.replace("__emoji__", "");
-      const id = Date.now() + Math.random();
-      const x = 20 + Math.random() * 60;
-      setFloatingEmojis(prev => [...prev, { id, emoji, x }]);
-      setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 3000);
-    }
-  }, [lastMsgTs]);
 
   const copyLink = () => {
     navigator.clipboard.writeText(`${process.env.NEXT_PUBLIC_SITE_URL}/watch/${room.name}`);

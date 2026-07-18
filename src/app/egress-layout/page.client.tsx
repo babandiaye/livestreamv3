@@ -163,7 +163,7 @@ function EgressRoom() {
   }, [chatMessages])
 
   const visibleMessages = chatMessages.filter(
-    m => m.message && !m.message.startsWith("__emoji__") && !m.message.startsWith("__whiteboard_")
+    m => m.message && !m.message.startsWith("__whiteboard_")
   )
 
   return (

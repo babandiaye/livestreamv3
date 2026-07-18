@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useChat } from "@livekit/components-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useChat, useDataChannel } from "@livekit/components-react";
 import { Track, Participant, ConnectionState } from "livekit-client";
 import { TokenContext } from "@/components/token-context";
 import { Chat } from "@/components/chat";
@@ -107,7 +107,7 @@ export default function WatchPage({ roomName, serverUrl }: { roomName: string; s
 function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const authToken = useAuthToken();
   const room = useRoomContext();
-  const { send: sendChat, chatMessages } = useChat();
+  const { chatMessages } = useChat();
   const { localParticipant } = useLocalParticipant();
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare, Track.Source.Microphone]);
@@ -154,19 +154,29 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     }
   }, [onStage]);
 
-  const launchEmoji = (emoji: string) => { sendChat?.(`__emoji__${emoji}`); setShowEmojiPicker(false); };
+  // Réactions emoji : canal de données dédié « reactions » en LOSSY (cf. host).
+  // Réf. doc : /transport/data/packets/ (délivrance lossy) et /transport/data/.
+  const reactionThrottle = useRef<Map<string, number>>(new Map());
+  const showFloatingEmoji = useCallback((emoji: string) => {
+    const id = Date.now() + Math.random();
+    const x = 20 + Math.random() * 60;
+    setFloatingEmojis(prev => [...prev, { id, emoji, x }]);
+    setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 3000);
+  }, []);
 
-  const lastMsgTs = chatMessages[chatMessages.length - 1]?.timestamp;
-  React.useEffect(() => {
-    const last = chatMessages[chatMessages.length - 1];
-    if (last?.message?.startsWith("__emoji__")) {
-      const emoji = last.message.replace("__emoji__", "");
-      const id = Date.now() + Math.random();
-      const x = 20 + Math.random() * 60;
-      setFloatingEmojis(prev => [...prev, { id, emoji, x }]);
-      setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 3000);
-    }
-  }, [lastMsgTs]);
+  const { send: sendReaction } = useDataChannel("reactions", (msg) => {
+    const from = msg.from?.identity ?? "?";
+    const now = Date.now();
+    if (now - (reactionThrottle.current.get(from) ?? 0) < 1000) return;
+    reactionThrottle.current.set(from, now);
+    try { showFloatingEmoji(new TextDecoder().decode(msg.payload)); } catch {}
+  });
+
+  const launchEmoji = (emoji: string) => {
+    try { sendReaction?.(new TextEncoder().encode(emoji), { reliable: false }); } catch {}
+    showFloatingEmoji(emoji); // l'émetteur voit sa propre réaction (non renvoyée par le SFU)
+    setShowEmojiPicker(false);
+  };
 
   useEffect(() => {
     const last = chatMessages[chatMessages.length - 1]
