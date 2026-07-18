@@ -128,7 +128,6 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const onStage = myMeta.invited_to_stage;
   const handRaised = myMeta.hand_raised;
   const micOn = localParticipant.isMicrophoneEnabled;
-  const camOn = localParticipant.isCameraEnabled;
 
   useEffect(() => {
     const handleDisconnect = () => {
@@ -386,15 +385,8 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
                 }
               />
             )}
-            {onStage && (
-              <CtrlBtn label="Caméra" active={camOn} off={!camOn}
-                onClick={() => localParticipant.setCameraEnabled(!camOn)}
-                icon={camOn
-                  ? <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-                  : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h2a2 2 0 0 1 2 2v9.34m-7.72-2.06a4 4 0 1 1-5.56-5.56"/></svg>
-                }
-              />
-            )}
+            {/* Caméra désactivée pour les spectateurs, même sur scène (perf réseau) :
+                ils peuvent activer micro et partage d'écran uniquement. */}
             {onStage && (
               <CtrlBtn label="Écran" active={shareOn}
                 onClick={async () => { await localParticipant.setScreenShareEnabled(!shareOn); setShareOn(!shareOn); }}
