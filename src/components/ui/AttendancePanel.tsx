@@ -3,7 +3,24 @@
 import { useState, useEffect, useCallback } from "react"
 import Pagination from "@/components/ui/Pagination"
 import { PAGE_SIZE } from "@/types"
-import { User, Clock, Download, RefreshCw, Circle, Eye, ChevronDown } from "@/components/ui/icons"
+import { User, Clock, Download, RefreshCw, Circle, Eye, ChevronDown, Trash2 } from "@/components/ui/icons"
+
+// Corbeille sans libellé : sur mobile, une colonne d'actions portant le mot
+// « Supprimer » repousse le contenu utile hors de l'écran. L'intention reste
+// accessible via aria-label et title.
+const trashBtn = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 6,
+  background: "white",
+  color: "#dc2626",
+  border: "1px solid #fecaca",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  flexShrink: 0,
+} as const
 
 type Attendee = {
   identity: string
@@ -74,6 +91,34 @@ export default function AttendancePanel({ sessionId, roomTitle }: { sessionId: s
       n.has(key) ? n.delete(key) : n.add(key)
       return n
     })
+
+  // Suppression. `identity` absent = toute la séance.
+  // On recharge depuis le serveur plutôt que de retirer la ligne localement :
+  // la présence est agrégée côté serveur (durées cumulées, nb de connexions),
+  // un retrait optimiste afficherait des totaux faux jusqu'au prochain refresh.
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  const remove = async (g: Group, p?: Attendee) => {
+    const quoi = p
+      ? `la présence de « ${p.name} »`
+      : `TOUTE la séance du ${fmtDate(g.startedAt)} (${g.participants.length} participant(s))`
+    if (!confirm(`Supprimer ${quoi} ?\n\nCette action est irréversible.`)) return
+
+    const marqueur = p ? `${g.key}:${p.identity}` : g.key
+    setDeleting(marqueur)
+    try {
+      const qs = new URLSearchParams({ cycle: g.key })
+      if (p) qs.set("identity", p.identity)
+      const res = await fetch(`/api/admin/rooms/${sessionId}/attendance?${qs}`, { method: "DELETE" })
+      if (!res.ok) {
+        alert("Échec de la suppression : " + (await res.text().catch(() => "")))
+        return
+      }
+      await fetchAttendance()
+    } finally {
+      setDeleting(null)
+    }
+  }
 
   const exportCsv = () => {
     const rows: string[] = ["Session;Nom;Type;Rôle;Première connexion;Dernier départ;Temps total (s);Temps total;Reconnexions"]
@@ -167,6 +212,15 @@ export default function AttendancePanel({ sessionId, roomTitle }: { sessionId: s
                     >
                       {isOpen ? <ChevronDown size={14} /> : <Eye size={14} />} Détail
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); remove(g) }}
+                      disabled={deleting === g.key}
+                      aria-label="Supprimer cette séance"
+                      title="Supprimer cette séance"
+                      style={{ ...trashBtn, opacity: deleting === g.key ? .5 : 1 }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
 
@@ -192,6 +246,15 @@ export default function AttendancePanel({ sessionId, roomTitle }: { sessionId: s
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 600, color: "#0065b1", flexShrink: 0 }}>
                           <Clock size={14} /> {fmtDur(p.totalDurationSec)}
                         </div>
+                        <button
+                          onClick={() => remove(g, p)}
+                          disabled={deleting === `${g.key}:${p.identity}`}
+                          aria-label={`Supprimer la présence de ${p.name}`}
+                          title={`Supprimer la présence de ${p.name}`}
+                          style={{ ...trashBtn, opacity: deleting === `${g.key}:${p.identity}` ? .5 : 1 }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     ))}
                     <Pagination
