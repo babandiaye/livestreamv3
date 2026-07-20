@@ -28,7 +28,15 @@ function JoinForm({ roomName, onJoin }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ room_name: roomName, identity: name.trim() }),
       });
-      if (!res.ok) { setError(await res.text()); return; }
+      if (!res.ok) {
+        const detail = await res.text();
+        // Cas de course : l'animateur a quitté entre le contrôle de présence et
+        // l'envoi du formulaire. On traduit le code interne en message lisible.
+        setError(detail === "NO_MODERATOR"
+          ? "La session n'a pas encore démarré. En attente d'un modérateur."
+          : detail);
+        return;
+      }
       const { auth_token, connection_details: { token } } = await res.json() as JoinStreamResponse;
       onJoin(auth_token, token);
     } catch { setError("Erreur réseau"); }
@@ -78,8 +86,59 @@ function JoinForm({ roomName, onJoin }: {
   );
 }
 
+/**
+ * Écran affiché quand aucun animateur n'est connecté : on informe, puis on
+ * redirige.
+ *
+ * Pas de sondage en boucle, volontairement. Un amphi entier ouvrant le lien
+ * avant l'heure produirait une requête par étudiant et par intervalle, et ce
+ * précisément au moment le plus chargé. Un contrôle unique au chargement suffit :
+ * l'étudiant est renvoyé d'où il vient et rouvrira le lien le moment venu.
+ */
+function WaitingRoom({ roomName, secondes }: { roomName: string; secondes: number }) {
+  return (
+    <div style={{ minHeight: "100dvh", background: "#f8fafd", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "'Google Sans','Segoe UI',system-ui,sans-serif" }}>
+      <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 16, padding: "44px 36px", width: "100%", maxWidth: 460, display: "flex", flexDirection: "column", alignItems: "center", gap: 18, boxShadow: "0 4px 32px rgba(0,0,0,.08)", textAlign: "center" }}>
+        <img src="/logo-unchk.png" alt="UN-CHK" style={{ height: 40, objectFit: "contain" }} onError={(e) => (e.currentTarget.style.display = "none")} />
+
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#fff7ed", border: "1px solid #fed7aa", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30 }}>
+          ⏳
+        </div>
+
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#1a1a2e", marginBottom: 8 }}>
+            Pas de session en direct actuellement
+          </div>
+          <div style={{ fontSize: 14, color: "#6b7280", lineHeight: 1.55 }}>
+            En attente d&apos;un modérateur. Rouvrez ce lien une fois que
+            l&apos;enseignant aura lancé le webinaire.
+          </div>
+        </div>
+
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#e8f4ff", color: "#0065b1", fontSize: 13, fontWeight: 500, padding: "4px 14px", borderRadius: 20, border: "1px solid #b8d9f5" }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#0065b1" }} />
+          {decodeURIComponent(roomName)}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#9ca3af" }}>
+          <span style={{ width: 13, height: 13, border: "2px solid #e2e8f0", borderTopColor: "#0065b1", borderRadius: "50%", animation: "wr-spin .8s linear infinite", display: "inline-block" }} />
+          Redirection dans {secondes} seconde{secondes > 1 ? "s" : ""}…
+        </div>
+      </div>
+      <style>{`@keyframes wr-spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
 export default function WatchPage({ roomName, serverUrl }: { roomName: string; serverUrl: string }) {
   const [session, setSession] = useState<{ authToken: string; roomToken: string } | null>(null);
+  // "checking" au premier chargement, puis "waiting" ou "open".
+  const [gate, setGate] = useState<"checking" | "waiting" | "open">("checking");
+  const [secondesAvantRedirection, setSecondesAvantRedirection] = useState(6);
+
+  const returnUrl = typeof window !== "undefined"
+    ? (new URLSearchParams(window.location.search).get("returnUrl") || "/")
+    : "/"
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -87,9 +146,49 @@ export default function WatchPage({ roomName, serverUrl }: { roomName: string; s
     if (token && !session) setSession({ authToken: token, roomToken: token })
   }, [])
 
-  const returnUrl = typeof window !== "undefined"
-    ? (new URLSearchParams(window.location.search).get("returnUrl") || "/")
-    : "/"
+  // Contrôle UNIQUE au chargement — aucun sondage répété : le coût serait
+  // proportionnel au nombre d'étudiants en attente multiplié par la durée de
+  // l'attente, au pire moment (tout un amphi ouvrant le lien avant l'heure).
+  //
+  // Il couvre les deux chemins d'entrée : le formulaire comme le lien Moodle
+  // porteur d'un ?token= déjà émis, qui échapperait sinon à tout contrôle
+  // puisque son jeton est valide côté LiveKit.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/room-status?roomName=${encodeURIComponent(roomName)}`);
+        const { moderatorPresent } = await res.json();
+        if (!cancelled) setGate(moderatorPresent ? "open" : "waiting");
+      } catch {
+        if (!cancelled) setGate("waiting");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [roomName]);
+
+  // Décompte puis redirection. On retourne vers returnUrl quand il existe (le
+  // cours Moodle d'origine) plutôt que vers l'accueil, où l'étudiant n'aurait
+  // rien à faire.
+  useEffect(() => {
+    if (gate !== "waiting") return;
+    if (secondesAvantRedirection <= 0) {
+      window.location.href = returnUrl;
+      return;
+    }
+    const t = setTimeout(() => setSecondesAvantRedirection((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [gate, secondesAvantRedirection, returnUrl]);
+
+  // Écran neutre pendant le contrôle : on n'affiche « pas de session » qu'une
+  // fois la réponse connue, pour ne pas faire clignoter un message faux.
+  if (gate === "checking") {
+    return <div style={{ minHeight: "100dvh", background: "#f8fafd" }} />;
+  }
+
+  if (gate === "waiting") {
+    return <WaitingRoom roomName={roomName} secondes={secondesAvantRedirection} />;
+  }
 
   if (!session) {
     return <JoinForm roomName={roomName} onJoin={(authToken, roomToken) => setSession({ authToken, roomToken })} />;

@@ -7,6 +7,13 @@ export async function POST(req: Request) {
     const response = await controller.joinStream(body as JoinStreamParams);
     return Response.json(response);
   } catch (err) {
-    return new Response(err instanceof Error ? err.message : null, { status: 500 });
+    const message = err instanceof Error ? err.message : null;
+    // Pas d'animateur dans la salle : ce n'est pas une panne, c'est un refus
+    // attendu. On le distingue par un 403 pour que le client affiche l'écran
+    // d'attente plutôt qu'une erreur technique.
+    if (message === "NO_MODERATOR") {
+      return new Response("NO_MODERATOR", { status: 403 });
+    }
+    return new Response(message, { status: 500 });
   }
 }

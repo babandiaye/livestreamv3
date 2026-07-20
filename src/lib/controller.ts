@@ -154,6 +154,95 @@ export async function assertRoomCreator(session: Session): Promise<void> {
   }
 }
 
+// ─── Présence d'un modérateur ─────────────────────────────────────────────────
+
+// Un spectateur ne doit pas pouvoir entrer dans une salle sans animateur.
+//
+// On ne se fie PAS au statut LIVE en base : il reste bloqué à LIVE quand le
+// webhook room_finished est perdu (SFU redémarré, appli indisponible), et c'est
+// précisément ce cas qui laissait des salles « ouvertes » sans personne dedans.
+// On interroge donc l'état réel du SFU.
+//
+// Trois conditions cumulatives :
+//   1. la salle existe côté LiveKit ;
+//   2. ses métadonnées portent un creator_identity — une salle auto-créée par
+//      l'arrivée d'un spectateur a des métadonnées VIDES, seul /api/moodle/start
+//      (ou createStream) les renseigne ;
+//   3. ce créateur est effectivement connecté en ce moment.
+async function queryModeratorPresence(room_name: string): Promise<boolean> {
+  const httpUrl = process.env.LIVEKIT_WS_URL!
+    .replace("wss://", "https://")
+    .replace("ws://", "http://");
+  const roomService = new RoomServiceClient(
+    httpUrl,
+    process.env.LIVEKIT_API_KEY!,
+    process.env.LIVEKIT_API_SECRET!
+  );
+
+  const rooms = await roomService.listRooms([room_name]);
+  if (rooms.length === 0) return false;
+
+  let creator_identity: string | undefined;
+  try {
+    creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
+  } catch {
+    creator_identity = undefined;
+  }
+  if (!creator_identity) return false;
+
+  const participants = await roomService.listParticipants(room_name);
+  return participants.some((p) => p.identity === creator_identity);
+}
+
+// Cache + regroupement des appels concurrents.
+//
+// L'écran d'attente est sondé par CHAQUE spectateur : 1000 étudiants massés
+// devant un cours qui n'a pas commencé produiraient sinon ~200 appels Twirp par
+// seconde au SFU, dont un listParticipants qui sérialise toute la salle — et ce
+// au pire moment, juste avant le démarrage.
+//
+// - `presenceCache` : une interrogation du SFU par salle et par TTL, quel que
+//   soit le nombre de spectateurs.
+// - `inFlight` : sans lui, l'expiration du TTL déclencherait un appel par
+//   requête simultanée (effet de meute au moment précis de la péremption). Les
+//   appelants concurrents partagent la même promesse.
+const PRESENCE_TTL_MS = 5_000;
+const presenceCache = new Map<string, { value: boolean; expiresAt: number }>();
+const inFlight = new Map<string, Promise<boolean>>();
+
+export async function isModeratorPresent(
+  room_name: string,
+  // Le contrôle d'accès réel (joinStream) interroge le SFU sans cache : il n'est
+  // appelé qu'à la soumission du formulaire, donc rare. Seul l'affichage de
+  // l'écran d'attente, lui massivement sollicité, se contente du cache.
+  { cached = false }: { cached?: boolean } = {}
+): Promise<boolean> {
+  if (!cached) return queryModeratorPresence(room_name);
+
+  const now = Date.now();
+  const hit = presenceCache.get(room_name);
+  if (hit && hit.expiresAt > now) return hit.value;
+
+  const pending = inFlight.get(room_name);
+  if (pending) return pending;
+
+  const promise = queryModeratorPresence(room_name)
+    .then((value) => {
+      presenceCache.set(room_name, { value, expiresAt: Date.now() + PRESENCE_TTL_MS });
+      // Purge opportuniste : les salles sondées puis abandonnées ne doivent pas
+      // faire croître la table indéfiniment.
+      if (presenceCache.size > 500) {
+        const t = Date.now();
+        for (const [k, v] of presenceCache) if (v.expiresAt <= t) presenceCache.delete(k);
+      }
+      return value;
+    })
+    .finally(() => inFlight.delete(room_name));
+
+  inFlight.set(room_name, promise);
+  return promise;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function defaultPermission(): ParticipantPermission {
@@ -310,6 +399,16 @@ export class Controller {
   }
 
   async joinStream({ identity: displayName, room_name, user_id, user_email }: JoinStreamParams): Promise<JoinStreamResponse> {
+    // Refus d'émettre un jeton tant qu'aucun animateur n'est présent. Sans ce
+    // garde-fou, le simple fait d'ouvrir un lien /watch faisait auto-créer la
+    // salle par LiveKit : les spectateurs se retrouvaient seuls dans une salle
+    // vide en croyant le cours commencé, et la feuille de présence enregistrait
+    // des séances fictives. Le contrôle est ici, côté serveur : l'écran d'attente
+    // du client n'est qu'un confort, il est contournable.
+    if (!(await isModeratorPresent(room_name))) {
+      throw new Error("NO_MODERATOR");
+    }
+
     const identity = crypto.randomUUID();
 
     // Référence utilisateur pour la liste de présence (lue par le webhook au
