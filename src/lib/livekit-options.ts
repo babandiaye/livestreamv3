@@ -21,7 +21,13 @@ export const viewerRoomOptions: RoomOptions = {
   // Réf. doc : https://docs.livekit.io/transport/media/advanced/
   publishDefaults: {
     screenShareEncoding: ScreenSharePresets.h720fps15.encoding,
-    screenShareSimulcastLayers: [ScreenSharePresets.h360fps3],
+    // [] = AUCUNE couche simulcast supplémentaire. Sans ce tableau vide, le SDK
+    // ajoute d'office une couche à demi-résolution
+    // (computeDefaultScreenShareSimulcastPresets, scaleResolutionDownBy: 2) que
+    // adaptiveStream sélectionne dès que le conteneur est plus petit que la
+    // source — d'où du texte encodé en 360p, illisible. Le partage d'écran est
+    // du contenu statique : mieux vaut une seule couche nette.
+    screenShareSimulcastLayers: [],
   },
 };
 
@@ -35,6 +41,13 @@ export const publisherRoomOptions: RoomOptions = {
   publishDefaults: {
     videoEncoding: { maxBitrate: 1_200_000, maxFramerate: 30 },
     videoSimulcastLayers: [VideoPresets.h360, VideoPresets.h180],
+    // Idem côté animateur : l'écran garde l'encodage par défaut du SDK
+    // (h1080fps15, 2,5 Mb/s) mais SANS couche à demi-résolution, sinon les
+    // slides partent en 960×540 chez les participants (constaté le 19/07/2026 :
+    // frameHeight=492 reçu pour une source de 984 px). La caméra, elle, conserve
+    // ses couches h360/h180 — c'est du contenu animé, la dégradation y est
+    // acceptable et nécessaire pour les petits réseaux.
+    screenShareSimulcastLayers: [],
   },
 };
 
