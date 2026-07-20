@@ -647,7 +647,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
             </div>
 
             <div style={{ display: panel === "chat" ? "contents" : "none" }}>
-              <Chat />
+              <Chat canExport />
             </div>
 
             {panel === "participants" && (

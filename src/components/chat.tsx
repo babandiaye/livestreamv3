@@ -2,15 +2,22 @@
 
 import { useChat, useLocalParticipant, useRoomInfo } from "@livekit/components-react";
 import { RoomMetadata } from "@/lib/controller";
+import { formatChatTranscript, transcriptFilename } from "@/lib/chat-transcript";
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 
-export function Chat() {
+/**
+ * `canExport` : réservé à l'animateur (page /host). Un export déclenché par un
+ * participant ne contiendrait de toute façon que les messages reçus depuis SA
+ * connexion — le chat LiveKit n'est pas persisté et rien n'est rejoué à
+ * l'arrivée.
+ */
+export function Chat({ canExport = false }: { canExport?: boolean }) {
   const [draft, setDraft] = useState("");
   const [cooldown, setCooldown] = useState(false);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { chatMessages, send } = useChat();
   const { localParticipant } = useLocalParticipant();
-  const { metadata } = useRoomInfo();
+  const { metadata, name: roomName } = useRoomInfo();
 
   const parsed = metadata ? JSON.parse(metadata) : {};
   const chatEnabled = parsed.enable_chat ?? true;
@@ -35,6 +42,18 @@ export function Chat() {
 
   const canSend = chatEnabled && draft.trim().length > 0 && !cooldown;
 
+  // Export texte : on génère le fichier depuis la mémoire du navigateur puis on
+  // révoque immédiatement l'URL objet pour ne pas retenir le Blob.
+  const onExport = useCallback(() => {
+    const contenu = formatChatTranscript(messages, roomName || "session");
+    const url = URL.createObjectURL(new Blob([contenu], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = transcriptFilename(roomName || "session");
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [messages, roomName]);
+
   // Auto-défilement vers le dernier message
   const messagesRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -44,7 +63,23 @@ export function Chat() {
 
   return (
     <div className="chat-root">
-      <div className="chat-header">💬 Chat en direct</div>
+      <div className="chat-header">
+        <span>💬 Chat en direct</span>
+        {canExport && (
+          <button
+            className="chat-export"
+            onClick={onExport}
+            disabled={messages.length === 0}
+            title={
+              messages.length === 0
+                ? "Aucun message à exporter"
+                : `Télécharger ${messages.length} message(s) en .txt`
+            }
+          >
+            ⬇ Exporter
+          </button>
+        )}
+      </div>
       <div className="chat-messages" ref={messagesRef}>
         {messages.length === 0 && <div className="chat-empty">Aucun message pour l'instant</div>}
         {messages.map((msg) => {
@@ -75,7 +110,10 @@ export function Chat() {
 
       <style>{`
         .chat-root { display:flex; flex-direction:column; flex:1; min-height:0; height:100%; }
-        .chat-header { padding:14px 16px; border-bottom:1px solid #3c4043; font-size:0.85rem; font-weight:600; color:#e8eaed; flex-shrink:0; }
+        .chat-header { padding:14px 16px; border-bottom:1px solid #3c4043; font-size:0.85rem; font-weight:600; color:#e8eaed; flex-shrink:0; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .chat-export { background:#303134; border:1px solid #3c4043; border-radius:6px; color:#8ab4f8; font-size:0.72rem; font-weight:600; padding:5px 10px; cursor:pointer; font-family:inherit; white-space:nowrap; }
+        .chat-export:hover:not(:disabled) { background:#3c4043; border-color:#8ab4f8; }
+        .chat-export:disabled { opacity:.4; cursor:not-allowed; }
         .chat-messages { flex:1; min-height:0; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
         .chat-empty { color:#5f6368; font-size:0.85rem; text-align:center; margin-top:32px; }
         .chat-msg { display:flex; flex-direction:column; gap:2px; }
