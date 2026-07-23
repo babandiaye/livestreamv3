@@ -1,6 +1,7 @@
 import NextAuth, { type DefaultSession } from "next-auth"
 import Keycloak from "next-auth/providers/keycloak"
 import { prisma } from "@/lib/prisma"
+import { isStudentAffiliation, isStudentBlockEnabled } from "@/lib/settings"
 import type { Role } from "@/types"
 
 declare module "next-auth" {
@@ -28,6 +29,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
+    // Refus d'ouverture de session SSO pour un étudiant quand le blocage est
+    // activé. Placé dans signIn (avant jwt) : l'étudiant bloqué n'est même pas
+    // créé/mis à jour en base. Le chemin Moodle (/api/moodle/join) n'utilise pas
+    // le SSO et n'est donc PAS concerné — un étudiant y accède toujours.
+    async signIn({ profile }) {
+      const affiliation = (profile as any)?.affiliation
+      if (isStudentAffiliation(affiliation) && (await isStudentBlockEnabled())) {
+        // Chaîne de redirection : Auth.js envoie l'utilisateur vers cette page
+        // d'information au lieu d'ouvrir la session.
+        return "/acces-refuse"
+      }
+      return true
+    },
+
     async jwt({ token, account, profile }) {
       if (account) {
         token.access_token = account.access_token
@@ -37,7 +52,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           p?.resource_access?.[process.env.KEYCLOAK_CLIENT_ID!]?.roles ?? []
         const realmRoles: string[] =
           p?.realm_access?.roles ?? []
-        const keycloakRole = mapKeycloakRoleToAppRole([...clientRoles, ...realmRoles])
+        // Un étudiant est TOUJOURS VIEWER, quels que soient ses rôles Keycloak :
+        // règle métier indépendante de l'interrupteur de blocage. Empêche qu'un
+        // affiliation=Etudiant se retrouve modérateur ou admin.
+        const keycloakRole = isStudentAffiliation(p?.affiliation)
+          ? "VIEWER"
+          : mapKeycloakRoleToAppRole([...clientRoles, ...realmRoles])
 
         try {
           const existingUser = await prisma.user.findFirst({
@@ -50,8 +70,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           })
 
           if (existingUser) {
+            // Préservation d'un rôle élevé attribué manuellement (Keycloak ne
+            // renvoie parfois pas les rôles applicatifs) — SAUF pour un étudiant,
+            // qui doit rester VIEWER même s'il avait été promu par erreur en base.
+            const isStudent = isStudentAffiliation(p?.affiliation)
             const keepRole =
-              keycloakRole === "VIEWER" && existingUser.role !== "VIEWER"
+              !isStudent && keycloakRole === "VIEWER" && existingUser.role !== "VIEWER"
                 ? existingUser.role
                 : keycloakRole
 

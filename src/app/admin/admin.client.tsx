@@ -41,6 +41,12 @@ const IconActivity = () => (
     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
   </svg>
 )
+const IconSettings = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+  </svg>
+)
 
 // Style partagé pour une métadonnée « icône + texte » alignée dans une ligne d'infos.
 const metaSpan = { display: "inline-flex", alignItems: "center", gap: 4 } as const
@@ -65,6 +71,7 @@ const NAV_GROUPS = [
     title: "Système",
     items: [
       { key: "status", label: "Statut services", icon: <IconActivity /> },
+      { key: "settings", label: "Paramètres", icon: <IconSettings /> },
     ],
   },
 ]
@@ -74,7 +81,10 @@ export default function AdminClient({
 }: {
   user: { id: string; name?: string | null; email?: string | null; role: Role }
 }) {
-  const [nav, setNav] = useState<"rooms" | "users" | "recordings" | "status">("rooms")
+  const [nav, setNav] = useState<"rooms" | "users" | "recordings" | "status" | "settings">("rooms")
+  const [blockStudents, setBlockStudents] = useState(false)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const [savingSetting, setSavingSetting] = useState(false)
   const [users, setUsers] = useState<UserRecord[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
   const [recordings, setRecordings] = useState<Recording[]>([])
@@ -86,6 +96,11 @@ export default function AdminClient({
   const [recPage, setRecPage] = useState(1)
   const [roomPage, setRoomPage] = useState(1)
   const [userSearch, setUserSearch] = useState("")
+  // Tri de la liste utilisateurs. Par défaut : les plus récents d'abord, ce qui
+  // correspond à l'ordre déjà renvoyé par l'API.
+  const [userSort, setUserSort] = useState<{ field: "createdAt" | "role"; dir: "asc" | "desc" }>(
+    { field: "createdAt", dir: "desc" }
+  )
 
   // Import CSV utilisateurs
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -127,11 +142,41 @@ export default function AdminClient({
     setLoading(false)
   }, [])
 
+  const fetchSettings = useCallback(async () => {
+    const res = await fetch("/api/admin/settings")
+    if (res.ok) {
+      const d = await res.json()
+      setBlockStudents(Boolean(d.blockStudents))
+    }
+    setSettingsLoaded(true)
+  }, [])
+
   useEffect(() => {
     if (nav === "users")      fetchUsers()
     if (nav === "rooms")      fetchRooms()
     if (nav === "recordings") fetchRecordings()
-  }, [nav, fetchUsers, fetchRooms, fetchRecordings])
+    if (nav === "settings")   fetchSettings()
+  }, [nav, fetchUsers, fetchRooms, fetchRecordings, fetchSettings])
+
+  // Sauvegarde immédiate à chaque bascule, avec retour arrière optimiste si
+  // l'API échoue (le réglage a un effet réel sur les connexions étudiantes).
+  const toggleBlockStudents = async (value: boolean) => {
+    setBlockStudents(value)
+    setSavingSetting(true)
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockStudents: value }),
+      })
+      if (!res.ok) { setBlockStudents(!value); alert("Échec de l'enregistrement du réglage") }
+      else { const d = await res.json(); setBlockStudents(Boolean(d.blockStudents)) }
+    } catch {
+      setBlockStudents(!value); alert("Échec de l'enregistrement du réglage")
+    } finally {
+      setSavingSetting(false)
+    }
+  }
 
   const importCsv = async (file: File) => {
     setImporting(true)
@@ -200,6 +245,29 @@ export default function AdminClient({
     }
   }
 
+  const [deletingUser, setDeletingUser] = useState<string | null>(null)
+
+  const deleteUser = async (u: UserRecord) => {
+    if (!confirm(`Supprimer « ${u.name} » (${u.email}) ?\n\nSes inscriptions seront retirées ; ses présences passées sont conservées (anonymisées). Action irréversible.`)) return
+    setDeletingUser(u.id)
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: u.id }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        alert(d.error || "Échec de la suppression")
+        return
+      }
+      setUsers((prev) => prev.filter((x) => x.id !== u.id))
+      setSelectedUsers((prev) => { const n = new Set(prev); n.delete(u.id); return n })
+    } finally {
+      setDeletingUser(null)
+    }
+  }
+
   const deleteRoom = async (id: string) => {
     if (!confirm("Supprimer cette salle ?")) return
     await fetch(`/api/rooms/${id}`, { method: "DELETE" })
@@ -248,12 +316,26 @@ export default function AdminClient({
     alert("Lien copié !")
   }
 
-  const filteredUsers = userSearch.trim().length > 0
+  // Rang de privilège : trier les rôles par niveau (et non par ordre
+  // alphabétique, qui n'aurait aucun sens métier). Croissant = du moins au plus
+  // privilégié.
+  const ROLE_RANK: Record<Role, number> = { VIEWER: 1, MODERATOR: 2, ADMIN: 3 }
+
+  const searchedUsers = userSearch.trim().length > 0
     ? users.filter((u) =>
         u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
         u.email.toLowerCase().includes(userSearch.toLowerCase())
       )
     : users
+
+  // Copie avant tri : `sort` mute le tableau, et muter l'état `users` en place
+  // empêcherait React de détecter le changement.
+  const filteredUsers = [...searchedUsers].sort((a, b) => {
+    const cmp = userSort.field === "role"
+      ? ROLE_RANK[a.role] - ROLE_RANK[b.role]
+      : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    return userSort.dir === "asc" ? cmp : -cmp
+  })
 
   const pagedUsers      = filteredUsers.slice((userPage - 1) * PAGE_SIZE, userPage * PAGE_SIZE)
   const pagedRooms      = rooms.slice((roomPage - 1) * PAGE_SIZE, roomPage * PAGE_SIZE)
@@ -454,6 +536,44 @@ export default function AdminClient({
                 </div>
               </div>
 
+              {/* Tri : un clic sur le critère actif inverse le sens. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 500 }}>Trier par :</span>
+                {([
+                  ["createdAt", "Date de création"],
+                  ["role", "Rôle"],
+                ] as const).map(([field, label]) => {
+                  const active = userSort.field === field
+                  return (
+                    <button
+                      key={field}
+                      onClick={() => {
+                        setUserSort((prev) => prev.field === field
+                          ? { field, dir: prev.dir === "asc" ? "desc" : "asc" }
+                          // Nouveau critère : on repart en décroissant (plus récent /
+                          // plus privilégié d'abord), l'attente la plus courante.
+                          : { field, dir: "desc" })
+                        setUserPage(1)
+                      }}
+                      title={active
+                        ? `Trié par ${label.toLowerCase()} — ${userSort.dir === "asc" ? "croissant" : "décroissant"} (cliquer pour inverser)`
+                        : `Trier par ${label.toLowerCase()}`}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                        padding: "5px 12px", borderRadius: 7, fontSize: 13, fontWeight: 500,
+                        cursor: "pointer", fontFamily: "inherit",
+                        border: active ? "1px solid #0065b1" : "1px solid #e2e8f0",
+                        background: active ? "#e8f4ff" : "white",
+                        color: active ? "#0065b1" : "#374151",
+                      }}
+                    >
+                      {label}
+                      {active && <span aria-hidden style={{ fontSize: 11 }}>{userSort.dir === "asc" ? "▲" : "▼"}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+
               {importResult && (
                 <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#065f46", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Check size={16} /> <span>Import terminé — <strong>{importResult.created}</strong> créé(s), {importResult.skipped} déjà existant(s) sur {importResult.total} ligne(s) valide(s).</span></span>
@@ -535,6 +655,33 @@ export default function AdminClient({
                             <option value="MODERATOR">Modérateur</option>
                             <option value="ADMIN">Administrateur</option>
                           </select>
+                          {(() => {
+                            const isSelf = u.id === user.id
+                            const isCreator = u.sessionCount > 0
+                            const disabled = deletingUser === u.id || isSelf || isCreator
+                            const title = isSelf
+                              ? "Vous ne pouvez pas supprimer votre propre compte"
+                              : isCreator
+                                ? `Cet utilisateur a créé ${u.sessionCount} salle(s) — suppression impossible`
+                                : "Supprimer l'utilisateur"
+                            return (
+                              <button
+                                onClick={() => deleteUser(u)}
+                                disabled={disabled}
+                                aria-label={title}
+                                title={title}
+                                style={{
+                                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                  padding: 7, background: "white", color: "#dc2626",
+                                  border: "1px solid #fecaca", borderRadius: 6,
+                                  cursor: disabled ? "not-allowed" : "pointer",
+                                  opacity: disabled ? 0.4 : 1, flexShrink: 0, fontFamily: "inherit",
+                                }}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )
+                          })()}
                         </div>
                       </div>
                     ))}
@@ -575,6 +722,30 @@ export default function AdminClient({
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>Statut des services</h2>
               </div>
               <StatusPanel />
+            </div>
+          )}
+
+          {/* ── PARAMÈTRES ── */}
+          {nav === "settings" && (
+            <div style={{ maxWidth: 720 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>Paramètres</h2>
+              </div>
+
+              <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 20px 16px" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: .3, margin: "14px 0 4px" }}>
+                  Accès
+                </div>
+
+                {!settingsLoaded ? <Spinner /> : (
+                  <ToggleRow
+                    label={savingSetting ? "Interdire l'accès aux étudiants (enregistrement…)" : "Interdire l'accès aux étudiants"}
+                    desc="Quand activé, un étudiant (affiliation « Etudiant ») ne peut plus se connecter directement à la plateforme : il est redirigé vers une page l'invitant à passer par l'ENT ou Moodle. L'accès via un lien Moodle reste possible. Les comptes sans ce champ ne sont pas concernés."
+                    checked={blockStudents}
+                    onChange={toggleBlockStudents}
+                  />
+                )}
+              </div>
             </div>
           )}
         </div>

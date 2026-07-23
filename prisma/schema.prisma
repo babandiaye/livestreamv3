@@ -113,3 +113,11 @@ model Enrollment {
   @@index([sessionId])
   @@index([userId])
 }
+
+// Réglages globaux de la plateforme, en clé/valeur pour rester extensible sans
+// migration à chaque nouveau paramètre. Ex. : block_students = "on" | "off".
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
