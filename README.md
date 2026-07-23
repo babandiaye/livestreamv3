@@ -75,6 +75,42 @@ POSTGRES_USER=<utilisateur>
 POSTGRES_PASSWORD=<mot_de_passe>
 ```
 
+### ⚠️ ICE : ne jamais déclarer `turn_servers` sans `stun_servers`
+
+Dans `/opt/livekit/livekit-server.yaml`, déclarer `rtc.turn_servers` **remplace** les serveurs STUN par défaut dans la liste `iceServers` envoyée aux clients. Sans STUN, le navigateur ne découvre pas son IP publique → **aucun candidat `srflx`** → le seul chemin possible devient le **relais TURN en TLS/TCP**, et toute la visioconférence se dégrade (caméra reçue en `frameHeight=180`, image floue).
+
+Le symptôme se présente comme un problème d'encodage, mais **aucun réglage de bitrate ne le corrige** : sur un chemin relayé en TCP, remonter le débit ne fait qu'échanger du flou contre du gel.
+
+Configuration correcte — STUN **et** TURN, avec l'UDP proposé avant le TLS :
+
+```yaml
+rtc:
+  udp_port: 7882
+  tcp_port: 7881
+  node_ip: <IP_PUBLIQUE_DU_SFU>
+  use_external_ip: false
+  stun_servers:
+    - webinaire-turn.unchk.sn:3478
+    - webinaire-turn.unchk.sn:443
+  turn_servers:
+    - host: webinaire-turn.unchk.sn   # UDP d'abord : évite le blocage de tête
+      port: 443                        # de ligne et les retransmissions du TCP
+      protocol: udp
+      username: <user>
+      credential: <secret>
+    - host: webinaire-turn.unchk.sn   # TLS/TCP en dernier recours
+      port: 443
+      protocol: tls
+      username: <user>
+      credential: <secret>
+```
+
+> Les STUN publics Google sont **bloqués par le réseau UN-CHK** : utiliser notre coturn (`webinaire-turn.unchk.sn`), qui sert STUN **et** TURN. Vérifié : il répond en UDP sur **3478 et 443** et accepte les allocations TURN sur les deux (`no-tcp` est actif → seul le TLS/443 fonctionne en TCP).
+
+**Diagnostic** — capturer sur le SFU : `tcpdump -n -i <iface> "udp port 7882"`. Si 100 % du trafic provient de l'IP du serveur TURN et 0 % des IP clientes, aucun client ne tente l'UDP direct → suspecter la liste `iceServers`, pas l'encodeur. Côté navigateur, `chrome://webrtc-internals` : chercher un candidat `srflx` et le `relayProtocol` de la paire retenue.
+
+> ⚠️ Ce fichier **n'est pas versionné** : la correction doit être appliquée **manuellement sur chaque environnement** (préprod et prod).
+
 ---
 
 ## Déploiement LiveStreamV3
@@ -226,17 +262,21 @@ src/
 │   ├── moderator/              # Dashboard modérateur
 │   ├── student/                # Dashboard étudiant
 │   ├── host/                   # Interface animateur (stream)
-│   ├── watch/[roomName]/       # Page spectateur
+│   ├── watch/[roomName]/       # Page spectateur (contrôle « modérateur requis »)
+│   ├── acces-refuse/           # Page publique : accès étudiant bloqué
 │   ├── egress-layout/          # Layout composite pour l'enregistrement
-│   └── api/                    # Routes API (38 endpoints)
+│   └── api/                    # Routes API (41 endpoints)
 ├── components/
 │   ├── layout/                 # Sidebar (tiroir mobile), Footer
 │   └── ui/                     # Avatar, Badge, Pagination, RoomIcon, icons (Lucide),
 │                               #   RecordingList, EnrollPanel, AttendancePanel
 ├── lib/
 │   ├── services/               # enrollment / recording / session
-│   ├── controller.ts           # Orchestration LiveKit
+│   ├── controller.ts           # Orchestration LiveKit (+ isModeratorPresent)
 │   ├── attendance.ts           # Liste de présence (join/left/orphelins + agrégation)
+│   ├── chat-transcript.ts      # Formatage pur de la transcription du chat
+│   ├── livekit-options.ts      # RoomOptions centralisées (simulcast, dynacast)
+│   ├── settings.ts             # Réglages globaux (AppSetting) + règle « étudiant »
 │   ├── egress.ts               # Réconciliation des enregistrements
 │   └── prisma.ts
 ├── types/index.ts              # Types centralisés + utilitaires (formatDuration, formatSize)
@@ -266,7 +306,29 @@ Les participants **système** (egress `egress-recorder-*`, ingress `… (via OBS
 
 **Restitution** — sessions groupées et repliables (label `salle-timestamp`, bouton **Détail/œil**), avec temps total, heures d'arrivée/départ, nombre de reconnexions, **pagination** (sessions et participants) et **export CSV**.
 
+**Suppression** — une corbeille permet d'effacer soit **une séance entière**, soit **un participant** d'une séance :
+
+```
+DELETE /api/admin/rooms/[id]/attendance?cycle=<ms>               # toute la séance
+DELETE /api/admin/rooms/[id]/attendance?cycle=<ms>&identity=<id> # un participant
+```
+
+Le paramètre `cycle` est **obligatoire** dans les deux cas : une salle étant réutilisée d'une réunion à l'autre, l'omettre effacerait la présence de **toutes** les séances. Aucune suppression globale n'est donc accessible par simple oubli de paramètre. Droits : **ADMIN ou créateur de la salle** (plus restrictif que la consultation, ouverte aux modérateurs enrôlés) — l'opération est irréversible et engage la valeur probante de la feuille.
+
 > ⚠️ La table `Attendance` est ajoutée par la migration `add_attendance` → penser à `prisma migrate deploy` lors du déploiement (voir plus bas).
+
+---
+
+## Chat — export de la transcription
+
+La page animateur (`/host`) dispose d'un bouton **« Exporter »** qui télécharge le chat en `.txt` (horodatage, auteur, message).
+
+Le chat LiveKit **n'est pas persisté** : il transite par le data channel et vit en mémoire du navigateur. Deux conséquences :
+
+- l'export ne contient que les messages **reçus depuis la connexion de l'animateur** ;
+- un **rechargement de page vide l'historique**.
+
+C'est pourquoi le bouton est réservé à `/host` : un participant arrivé en cours de route n'exporterait qu'un fragment trompeur. Le formatage vit dans un module **pur** (`lib/chat-transcript.ts`), sans dépendance à LiveKit ni au DOM, afin d'être réutilisable côté serveur le jour où le chat sera persisté (analyse par LLM, extraction de questions).
 
 ---
 
@@ -452,15 +514,78 @@ Toutes les routes exigent le header `X-Api-Key: <MOODLE_API_KEY>`.
 | POST | `/api/moodle/enroll` | Enrôlement masse depuis Moodle |
 | DELETE | `/api/moodle/recordings/[id]` | Supprimer un enregistrement |
 
+> Le plugin identifie sa salle par le `roomid` renvoyé à la création, qu'il **mémorise** avec l'hôte de l'`apiurl` (colonne `roomapihost`, plugin ≥ 1.2.7). Changer l'URL du backend (préprod ↔ prod) rend ce `roomid` caduc : le plugin le détecte, oublie le lien et propose « Créer la salle » sur le backend courant. Un `404` sur `/status` déclenche la même auto-réparation.
+
+### Routes d'administration (session ADMIN requise)
+
+| Méthode | Route | Description |
+|---------|-------|-------------|
+| GET / PATCH | `/api/admin/settings` | Lire / modifier les réglages globaux |
+| DELETE | `/api/admin/users` | Supprimer un utilisateur (garde-fous, cf. Rôles) |
+| GET | `/api/admin/rooms/[id]/attendance` | Liste de présence (ADMIN ou modérateur enrôlé) |
+| DELETE | `/api/admin/rooms/[id]/attendance` | Supprimer une séance / un participant (ADMIN ou créateur) |
+
+### Route publique
+
+| Méthode | Route | Description |
+|---------|-------|-------------|
+| GET | `/api/room-status?roomName=` | Un animateur est-il connecté ? (booléen, sans authentification — les invités rejoignent par simple lien) |
+
 ---
 
 ## Rôles utilisateurs
 
 | Rôle | Redirection | Accès |
 |------|-------------|-------|
-| `ADMIN` | `/admin` | Gestion complète — salles, utilisateurs, enregistrements, statut services |
+| `ADMIN` | `/admin` | Gestion complète — salles, utilisateurs, enregistrements, statut services, paramètres |
 | `MODERATOR` | `/moderator` | Ses salles, enrôlement CSV/individuel, ses enregistrements |
 | `VIEWER` | `/student` | Sessions auxquelles il est enrôlé |
+
+### Règle « étudiant » (claim Keycloak `affiliation`)
+
+Un compte dont l'ID token porte `"affiliation": "Etudiant"` est **toujours forcé en `VIEWER`**, quels que soient ses rôles Keycloak — un étudiant ne peut donc jamais être modérateur ni administrateur. Cette règle est **permanente** et indépendante du réglage de blocage ci-dessous.
+
+Les comptes **sans** ce champ ne sont concernés par aucune règle étudiante (ni forçage, ni blocage).
+
+### Suppression d'un utilisateur
+
+`DELETE /api/admin/users` (ADMIN), via la corbeille de la liste. Trois garde-fous :
+
+- **auto-suppression interdite** ;
+- **refus (409) si l'utilisateur a créé des salles** — `Session.creatorId` est obligatoire et sans cascade : la suppression violerait la contrainte FK et orphelinerait salles, enregistrements et présences. Supprimer/réassigner ses salles d'abord ;
+- sinon suppression sûre : les **inscriptions** suivent en cascade, les **présences sont conservées** (`Attendance.userId` passe à `NULL`, l'historique reste exploitable).
+
+> ⚠️ Supprimer un compte n'est **pas** un bannissement : à sa prochaine connexion (Moodle ou SSO), l'utilisateur est **recréé** en `VIEWER`.
+
+---
+
+## Paramètres de la plateforme
+
+Onglet **Paramètres** de `/admin` (ADMIN uniquement). Les réglages sont stockés dans la table **`AppSetting`** (clé/valeur), conçue pour accueillir de nouveaux paramètres **sans migration** à chaque ajout.
+
+| Clé | Valeurs | Défaut | Effet |
+|-----|---------|--------|-------|
+| `block_students` | `on` / `off` | `off` | Interdit la connexion **SSO directe** aux comptes `affiliation = Etudiant` |
+
+Quand `block_students = on`, un étudiant qui tente de se connecter sur la plateforme est redirigé vers **`/acces-refuse`** (message + lien vers `https://ent.unchk.sn`) au lieu d'ouvrir une session.
+
+**L'accès via Moodle n'est PAS concerné** : `/api/moodle/join` s'authentifie par `MOODLE_API_KEY` et non par SSO — un étudiant venant d'un lien Moodle accède toujours à son cours.
+
+Le blocage porte sur l'`affiliation` et non sur le rôle : un `ADMIN` ne peut donc pas se verrouiller hors de la plateforme. Il s'applique **à la connexion** — une session étudiante déjà ouverte reste valide jusqu'à son expiration.
+
+> ⚠️ La table `AppSetting` est ajoutée par la migration `add_app_setting` → `prisma migrate deploy` obligatoire au déploiement. Sans elle, **toute connexion SSO échoue** (le callback `signIn` lit le réglage).
+
+---
+
+## Accès spectateur : modérateur requis
+
+Un lien `/watch/<salle>` ne donne accès à la session que si un **animateur est réellement connecté**. Le contrôle (`isModeratorPresent`, `lib/controller.ts`) interroge **l'état réel du SFU** — et non le statut `LIVE` en base, qui peut rester bloqué si le webhook `room_finished` est perdu. Trois conditions cumulatives : la salle existe, ses métadonnées portent un `creator_identity`, et ce créateur est connecté.
+
+- Côté serveur : `joinStream` refuse d'émettre un jeton (**403 `NO_MODERATOR`**) — c'est le contrôle non contournable.
+- Côté client : la page `/watch` interroge `GET /api/room-status` **une seule fois au chargement** (aucun sondage répété : un amphi entier en attente produirait sinon une requête par étudiant et par intervalle), affiche un message d'attente puis redirige vers `returnUrl`.
+- Un cache de 5 s avec regroupement des appels concurrents absorbe la rafale de connexions simultanées (mesuré : 200 requêtes → 3 appels au SFU).
+
+> Le lien Moodle porteur d'un `?token=` déjà émis n'est verrouillé que **visuellement** : son jeton reste valide côté LiveKit. Le verrou serveur pour ce chemin relèverait de `/api/moodle/join`.
 
 ---
 
@@ -590,6 +715,8 @@ docker logs livekit_egress --tail 50
 |---------|-------------|
 | **v1-refonte** | Refonte architecturale de la plateforme : composants UI réutilisables, services métier, types centralisés, landing page publique, middleware sécurisé, URL S3 signées pour les enregistrements, sidebar avec icônes SVG |
 | **v1.1** | Sécurité : vérification de signature des tokens LiveKit, contrôle « créateur » sur les actions animateur (kick / enregistrement / diffusion / OBS), `create_stream` réservé aux animateurs, auto-provision des étudiants Moodle. UX : notification compacte des demandes de prise de parole + acceptation depuis la liste des participants. Diffusion **OBS (RTMP/WHIP)** réactivée depuis la page animateur. Retrait des identifiants de base codés en dur (`DATABASE_URL` requis). Flux Git **dev / main / prod**. |
+| **v1.2** | **Qualité vidéo** : options LiveKit centralisées (`lib/livekit-options.ts`) — adaptiveStream, dynacast, plafonds de publication ; suppression de la couche simulcast à demi-résolution du **partage d'écran** (slides illisibles côté participant). Correction ICE **STUN + TURN/UDP** côté SFU (voir Infrastructure) — cause racine du flou. **Responsivité** des pages `/host` et `/watch`. Caméra interdite aux spectateurs montés sur scène (micro + partage d'écran seulement). Tableau blanc : synchronisation d'historique robuste (chunking, anti-tempête, persistance locale, autorisation d'écriture). |
+| **v1.2.1** | **Accès** : un lien `/watch` requiert un **animateur réellement connecté** (403 `NO_MODERATOR` + écran d'information). **Présence** : suppression d'une séance ou d'un participant. **Chat** : export `.txt` de la transcription depuis `/host`. **Utilisateurs** : suppression (avec garde-fous), tris par date de création et par rôle. **Paramètres** : nouvelle table `AppSetting` + réglage « Interdire l'accès aux étudiants » (claim `affiliation`), page `/acces-refuse`. Règle permanente : un étudiant est toujours `VIEWER`. |
 
 ---
 
