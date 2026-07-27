@@ -19,37 +19,35 @@ export async function POST(req: NextRequest) {
   if (!moderator)
     return NextResponse.json({ error: "Modérateur introuvable — doit se connecter une fois sur la plateforme" }, { status: 404 })
 
-  // Chercher par meetingId si fourni, sinon par courseId
-  let room = null
-  if (meetingId) {
-    room = await prisma.session.findFirst({
-      where: { moodleMeetingId: meetingId },
-    })
-  } else {
-    room = await prisma.session.findFirst({
-      where: { moodleCourseId: courseId },
-    })
-  }
+  // Toujours créer une salle neuve, identifiée par le cuid généré ici. On NE
+  // recherche PLUS de salle existante par moodleMeetingId : cet entier n'est
+  // unique qu'au sein d'UN Moodle, donc deux plateformes Moodle distinctes
+  // finissaient par se rattacher à la même salle (collision — incident du
+  // 27/07/2026 : « TEST Integration DISIDEV » rattachée à « Introduction au
+  // droit »). L'idempotence — ne pas recréer pour une activité qui a déjà sa
+  // salle — est garantie CÔTÉ PLUGIN : livestream_create_room n'est appelé qu'à
+  // la création de l'activité (add_instance) ou via « Créer la salle » gardé par
+  // empty(roomid). Même principe que le plugin matrix : décision locale avant
+  // création, identité (cuid) possédée par le backend. moodleCourseId /
+  // moodleMeetingId restent enregistrés comme métadonnées de provenance, jamais
+  // comme clé de réutilisation.
+  const roomName = title.toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    + "-" + Math.random().toString(36).slice(2, 6)
 
-  if (!room) {
-    const roomName = title.toLowerCase()
-      .replace(/\s+/g, "-")
-      .replace(/[^a-z0-9-]/g, "")
-      + "-" + Math.random().toString(36).slice(2, 6)
-
-    room = await prisma.session.create({
-      data: {
-        roomName,
-        title,
-        description: description ?? null,
-        creatorId: moderator.id,
-        moodleCourseId: courseId,
-        moodleMeetingId: meetingId ?? null,
-        chatEnabled: true,
-        participationEnabled: false,
-      },
-    })
-  }
+  const room = await prisma.session.create({
+    data: {
+      roomName,
+      title,
+      description: description ?? null,
+      creatorId: moderator.id,
+      moodleCourseId: courseId,
+      moodleMeetingId: meetingId ?? null,
+      chatEnabled: true,
+      participationEnabled: false,
+    },
+  })
 
   const base = process.env.NEXT_PUBLIC_SITE_URL
 
