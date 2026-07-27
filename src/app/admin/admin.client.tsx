@@ -48,6 +48,10 @@ const IconSettings = () => (
   </svg>
 )
 
+// Ordre « croissant » du statut d'une salle : Direct → Planifiée → Terminée.
+// Le tri décroissant inverse cet ordre.
+const STATUS_RANK: Record<string, number> = { LIVE: 0, SCHEDULED: 1, ENDED: 2 }
+
 // Style partagé pour une métadonnée « icône + texte » alignée dans une ligne d'infos.
 const metaSpan = { display: "inline-flex", alignItems: "center", gap: 4 } as const
 // Style partagé pour un bouton « icône + libellé ».
@@ -95,6 +99,8 @@ export default function AdminClient({
   const [userPage, setUserPage] = useState(1)
   const [recPage, setRecPage] = useState(1)
   const [roomPage, setRoomPage] = useState(1)
+  // Tri des salles par statut. null = ordre par défaut (plus récentes d'abord).
+  const [roomStatusSort, setRoomStatusSort] = useState<"asc" | "desc" | null>(null)
   const [userSearch, setUserSearch] = useState("")
   // Tri de la liste utilisateurs. Par défaut : les plus récents d'abord, ce qui
   // correspond à l'ordre déjà renvoyé par l'API.
@@ -338,7 +344,13 @@ export default function AdminClient({
   })
 
   const pagedUsers      = filteredUsers.slice((userPage - 1) * PAGE_SIZE, userPage * PAGE_SIZE)
-  const pagedRooms      = rooms.slice((roomPage - 1) * PAGE_SIZE, roomPage * PAGE_SIZE)
+  const sortedRooms = roomStatusSort
+    ? [...rooms].sort((a, b) => {
+        const cmp = (STATUS_RANK[a.status] ?? 99) - (STATUS_RANK[b.status] ?? 99)
+        return roomStatusSort === "asc" ? cmp : -cmp
+      })
+    : rooms
+  const pagedRooms      = sortedRooms.slice((roomPage - 1) * PAGE_SIZE, roomPage * PAGE_SIZE)
   const pagedRecordings = recordings.slice((recPage - 1) * PAGE_SIZE, recPage * PAGE_SIZE)
 
   return (
@@ -367,6 +379,29 @@ export default function AdminClient({
                     <span style={{ background: "#e8f4ff", color: "#0065b1", fontSize: 13, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>
                       {rooms.length}
                     </span>
+                    <button
+                      onClick={() => {
+                        setRoomStatusSort((s) => (s === null ? "asc" : s === "asc" ? "desc" : null))
+                        setRoomPage(1)
+                      }}
+                      title={
+                        roomStatusSort === null
+                          ? "Trier par statut (Direct → Planifiée → Terminée)"
+                          : roomStatusSort === "asc"
+                            ? "Statut croissant : Direct → Planifiée → Terminée (cliquer pour inverser)"
+                            : "Statut décroissant : Terminée → Planifiée → Direct (cliquer pour annuler)"
+                      }
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px",
+                        border: roomStatusSort ? "1px solid #0065b1" : "1px solid #e2e8f0",
+                        background: roomStatusSort ? "#e8f4ff" : "white",
+                        color: roomStatusSort ? "#0065b1" : "#6b7280",
+                        borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                      }}
+                    >
+                      Statut
+                      {roomStatusSort && <span aria-hidden style={{ fontSize: 11 }}>{roomStatusSort === "asc" ? "▲" : "▼"}</span>}
+                    </button>
                   </div>
                   <button
                     onClick={() => setShowCreate((v) => !v)}
