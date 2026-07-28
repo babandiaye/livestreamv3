@@ -1,5 +1,26 @@
-import { ScreenSharePresets, VideoPresets } from "livekit-client";
-import type { RoomOptions } from "livekit-client";
+import { AudioPresets, ScreenSharePresets, VideoPresets } from "livekit-client";
+import type { RoomOptions, TrackPublishDefaults } from "livekit-client";
+
+// Réglages audio communs (chantier bande passante du 28/07/2026). Sans eux, le
+// SDK applique ses défauts : preset « music » (48 kb/s) et RED actif, soit
+// ~96 kb/s par abonné une fois la redondance comptée. Sur un amphi de 1 500
+// spectateurs, c'est ~144 Mb/s en sortie de SFU pour de la voix mono.
+//
+// - audioPreset speech (24 kb/s) : Opus est conçu pour la parole et reste
+//   transparent à ce débit sur une voix. NE PAS descendre à telephone (12 kb/s),
+//   là il y aurait une perte audible.
+// - dtx : défaut du SDK, rendu explicite — les silences ne consomment ~rien.
+// - red false : supprime le doublon systématique de chaque paquet audio. RED
+//   n'améliore pas la qualité nominale, seulement la résilience aux PERTES.
+//   ⚠ Arbitrage assumé : à surveiller sur les réseaux mobiles dégradés. Si des
+//   coupures audio remontent chez les étudiants, réactiver red: true dans
+//   viewerAudioDefaults UNIQUEMENT (le host est sur le réseau de l'université).
+//   Ne jamais compenser en abaissant le preset.
+const audioDefaults: Pick<TrackPublishDefaults, "audioPreset" | "dtx" | "red"> = {
+  audioPreset: AudioPresets.speech,
+  dtx: true,
+  red: false,
+};
 
 // Options LiveKit centralisées — réponse à l'incident du 16/07/2026 (932
 // participants, lien 1 GbE saturé par une activation groupée de caméras).
@@ -20,6 +41,7 @@ export const viewerRoomOptions: RoomOptions = {
   // (1080p/15) et plusieurs partages simultanés rejoueraient l'incident du 16/07.
   // Réf. doc : https://docs.livekit.io/transport/media/advanced/
   publishDefaults: {
+    ...audioDefaults,
     screenShareEncoding: ScreenSharePresets.h720fps15.encoding,
     // [] = AUCUNE couche simulcast supplémentaire. Sans ce tableau vide, le SDK
     // ajoute d'office une couche à demi-résolution
@@ -39,6 +61,7 @@ export const publisherRoomOptions: RoomOptions = {
   dynacast: true,
   videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
   publishDefaults: {
+    ...audioDefaults,
     videoEncoding: { maxBitrate: 1_200_000, maxFramerate: 30 },
     videoSimulcastLayers: [VideoPresets.h360, VideoPresets.h180],
     // Idem côté animateur : l'écran garde l'encodage par défaut du SDK

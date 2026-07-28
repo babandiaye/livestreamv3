@@ -204,7 +204,23 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
   // l'historique si l'hôte a rechargé/quitté.
   const sendInit = useCallback((reqId?: string, dest?: string[]) => {
     const evs = eventStore.current
-    if (evs.length === 0) return
+    if (evs.length === 0) {
+      // Correctif 4a — tableau vierge : répondre « vide mais FINAL » au seul
+      // demandeur, au lieu de se taire. Sans cette réponse, personne ne répond
+      // jamais sur un tableau vide et le demandeur relance sa requête jusqu'à
+      // 20 fois — avec 1 500 clients qui ouvrent le tableau ensemble, cela fait
+      // des millions de messages reliable inutiles à travers le SFU.
+      // Réservé au cas ciblé (reqId + destinataire) : pas de broadcast vide.
+      if (!reqId || !dest || dest.length === 0) return
+      const init: WBInit = { v: 1, type: "init", events: [], seq: 0, final: true, reqId }
+      try {
+        localParticipant.publishData(
+          new TextEncoder().encode(JSON.stringify(init)),
+          { reliable: true, topic: WB_TOPIC, destinationIdentities: dest }
+        )
+      } catch {}
+      return
+    }
     const total = Math.ceil(evs.length / INIT_CHUNK)
     for (let i = 0; i < total; i++) {
       const init: WBInit = {
@@ -255,8 +271,12 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
   // (0-150 ms, répondeur privilégié), les spectateurs plus tard (300-1200 ms) et
   // annulent leur réponse si un autre pair a déjà répondu au même reqId. Résultat :
   // 1-2 réponses même avec des centaines de détenteurs (cf. incident du 16/07).
-  const scheduleInitResponse = useCallback((reqId?: string) => {
-    if (eventStore.current.length === 0) return            // rien à servir
+  const scheduleInitResponse = useCallback((reqId?: string, requester?: string) => {
+    const isEmpty = eventStore.current.length === 0
+    // Correctif 4a — tableau vierge : seul l'hôte (détenteur autoritaire) répond
+    // « vide et final », en ciblé. Si tous les pairs répondaient, on remplacerait
+    // une tempête de demandes par une tempête de réponses vides.
+    if (isEmpty && (readOnly || !reqId || !requester)) return
     const key = reqId ?? "__legacy__"
     if (servedReqs.current.has(key) || pendingResponses.current.has(key)) return
     const delay = readOnly ? 300 + Math.random() * 900 : Math.random() * 150
@@ -265,7 +285,7 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
       servedReqs.current.set(key, Date.now())
       const now = Date.now()
       for (const [k, t] of servedReqs.current) if (now - t > 30000) servedReqs.current.delete(k)  // purge
-      sendInit(reqId)
+      sendInit(reqId, isEmpty ? [requester!] : undefined)
     }, delay)
     pendingResponses.current.set(key, timer)
   }, [readOnly, sendInit])
@@ -305,18 +325,33 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
   // pouvoir récupérer l'historique d'un pair. On demande toujours au moins une
   // fois (même si localStorage a restauré du contenu : la réponse d'un pair fait
   // autorité), puis on relance tant qu'on n'a ni reçu d'init ni de contenu.
+  // Correctif 4b — ÉTALEMENT des demandes. Les délais étaient fixes (500 ms puis
+  // 2 500 ms) : à l'ouverture du tableau, la bascule des métadonnées atteint tous
+  // les clients en même temps et produisait une pointe simultanée de demandes,
+  // chacune relayée à tous les autres. L'aléa étale la pointe sur ~5 s, sans
+  // effet visible (le tableau s'affiche, l'historique arrive au fil de l'eau).
   useEffect(() => {
     let attempts = 0
-    const tick = () => {
-      if (hasReceivedInit.current || eventStore.current.length > 0 || attempts >= 20) {
-        clearInterval(iv); clearTimeout(first); return
-      }
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout>
+
+    const retry = () => {
+      if (stopped) return
+      if (hasReceivedInit.current || eventStore.current.length > 0 || attempts >= 20) return
       attempts++
       requestInit()
+      timer = setTimeout(retry, 2500 + Math.random() * 2000)
     }
-    const first = setTimeout(() => requestInit(), 500)  // 1re demande inconditionnelle
-    const iv = setInterval(tick, 2500)
-    return () => { clearInterval(iv); clearTimeout(first) }
+
+    // 1re demande toujours envoyée (la réponse d'un pair fait autorité, même si
+    // localStorage a restauré du contenu), mais désormais étalée sur 0,5-5 s.
+    timer = setTimeout(() => {
+      if (stopped) return
+      requestInit()
+      timer = setTimeout(retry, 2500 + Math.random() * 2000)
+    }, 500 + Math.random() * 4500)
+
+    return () => { stopped = true; clearTimeout(timer) }
   }, [requestInit])
 
   // ── Purge à la fermeture du tableau (démontage) ───────────────────────────
@@ -343,11 +378,11 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
       try { raw = new TextDecoder().decode(payload) } catch { return }
 
       // ── Demande d'historique (de n'importe quel participant) : legacy ou req-init
-      if (raw === "__wb_request_init__") { scheduleInitResponse(undefined); return }
+      if (raw === "__wb_request_init__") { scheduleInitResponse(undefined, participant?.identity); return }
       let msg: any
       try { msg = JSON.parse(raw) } catch { return }
       if (!msg || msg.v !== 1) return
-      if (msg.type === "req-init") { scheduleInitResponse(msg.reqId); return }
+      if (msg.type === "req-init") { scheduleInitResponse(msg.reqId, participant?.identity); return }
 
       const canvas = canvasRef.current
       if (!canvas) return
@@ -367,7 +402,12 @@ export default function Whiteboard({ readOnly = false }: { readOnly?: boolean })
         const isResponseToMe = !!msg.reqId && msg.reqId === currentReqId.current
         const isCreatorPush  = !msg.reqId && !!creatorIdentity && participant?.identity === creatorIdentity
         if (!isResponseToMe && !isCreatorPush) return
-        if (msg.seq === 0) { ctx.clearRect(0, 0, canvas.width, canvas.height); eventStore.current = [] }
+        // Correctif 4a — une réponse VIDE signifie « je n'ai rien à servir », pas
+        // « efface ce que tu as » : on ne repart de zéro que si l'init apporte du
+        // contenu. Sinon un client ayant restauré son historique depuis
+        // localStorage (parfois la seule copie survivante) le perdrait.
+        const isEmptyInit = msg.seq === 0 && msg.final && msg.events.length === 0
+        if (msg.seq === 0 && !isEmptyInit) { ctx.clearRect(0, 0, canvas.width, canvas.height); eventStore.current = [] }
         for (const ev of msg.events) { eventStore.current.push(ev); replayEvent(ctx, ev) }
         if (msg.final) { hasReceivedInit.current = true; currentReqId.current = null; schedulePersist() }
         return
