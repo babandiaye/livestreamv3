@@ -244,6 +244,22 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         method: "POST",
         headers: { Authorization: `Bearer ${authToken}` },
       });
+      // #6 — 409 : un egress tourne déjà sur cette salle (onglet rafraîchi, double
+      // clic). On ADOPTE l'enregistrement existant au lieu d'en lancer un second.
+      // Sans cette branche, le bouton resterait sur « démarrer » avec egressId à
+      // null, et l'animateur ne pourrait plus arrêter son propre enregistrement.
+      if (res.status === 409) {
+        const data = await res.json().catch(() => null);
+        if (data?.egress_id) {
+          const startedMs = data.started_at ? Date.parse(data.started_at) : NaN;
+          setEgressId(data.egress_id);
+          setRecordingWaiting(false);
+          setRecording(true);
+          setRecordingStartTime(Number.isNaN(startedMs) ? Date.now() : startedMs);
+          return data.egress_id;
+        }
+      }
+
       if (!res.ok) {
         const err = await res.text();
         alert(`Erreur démarrage enregistrement : ${err}`);

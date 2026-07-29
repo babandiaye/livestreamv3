@@ -1,5 +1,6 @@
 import { EgressClient, EncodedFileOutput, EncodedFileType, S3Upload, EncodingOptions } from "livekit-server-sdk"
 import { getSessionFromReq, assertRoomCreator } from "@/lib/controller"
+import { findActiveRecordingEgress } from "@/lib/egress"
 
 const egressClient = new EgressClient(
   process.env.LIVEKIT_WS_URL!.replace("wss://", "https://").replace("ws://", "http://"),
@@ -11,6 +12,29 @@ export async function POST(req: Request) {
   try {
     const session = await getSessionFromReq(req)
     await assertRoomCreator(session) // C2 — seul l'animateur peut enregistrer
+
+    // #6 — Verrou anti-doublon. Côté client, le seul garde-fou était l'état React
+    // `recording` : un rafraîchissement de l'onglet /host le remet à false alors
+    // que l'egress tourne toujours, et un 2e clic lançait un second Chrome
+    // headless sur la même salle. Coût réel : deux fichiers stockés pour un même
+    // cours et un slot egress perdu (la capacité est de 2 à 3 captures 1080p
+    // simultanées). Constaté en base : jusqu'à 3 enregistrements pour une session.
+    // On renvoie l'egressId existant pour que le client reprenne la main dessus
+    // (sinon l'animateur ne pourrait plus arrêter son propre enregistrement).
+    const active = await findActiveRecordingEgress(session.room_name)
+    if (active) {
+      console.log("[start_recording] déjà en cours:", active.egressId, "room:", session.room_name)
+      return Response.json(
+        {
+          error: "ALREADY_RECORDING",
+          egress_id: active.egressId,
+          started_at: active.startedAt?.toISOString() ?? null,
+          message: "Un enregistrement est déjà en cours pour cette salle.",
+        },
+        { status: 409 }
+      )
+    }
+
     const s3 = new S3Upload({
       accessKey: process.env.S3_ACCESS_KEY!,
       secret: process.env.S3_SECRET!,

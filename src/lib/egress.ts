@@ -42,6 +42,59 @@ async function finalizeFromInfo(recordingId: string, egress: any): Promise<"READ
   return "FAILED"
 }
 
+// #6 — Retrouve la salle d'un egress. Un web egress ne porte PAS de roomName
+// (contrairement à un room_composite) : la salle n'est connue que par le paramètre
+// de l'URL du layout passée à startWebEgress.
+export function egressRoomName(egress: any): string | undefined {
+  if (egress?.roomName) return egress.roomName
+  if (egress?.request?.case === "web") {
+    const url = (egress.request.value as any)?.url ?? ""
+    const match = url.match(/roomName=([^&]+)/)
+    if (match) return decodeURIComponent(match[1])
+  }
+  return undefined
+}
+
+export type ActiveRecording = { egressId: string; startedAt: Date | null }
+
+// #6 — Verrou anti-doublon : retourne l'enregistrement DÉJÀ en cours sur cette
+// salle, sinon null.
+//
+// La source de vérité est LIVEKIT, jamais la base :
+//  - un egress qui tourne réellement figure toujours dans listEgress({active}),
+//    y compris en EGRESS_STARTING — le cas visé (onglet /host rafraîchi, le state
+//    React `recording` repart à false alors que la capture continue) est donc
+//    couvert sans passer par la base ;
+//  - la base, elle, peut garder une ligne PROCESSING fantôme quand le webhook
+//    egress_ended a été perdu. S'y fier bloquerait l'enregistrement de la salle
+//    DÉFINITIVEMENT, car listEgress({egressId}) lève « egress does not exist »
+//    une fois l'egress purgé côté LiveKit — la réconciliation ne peut alors pas
+//    trancher et conserve le statut PROCESSING.
+//
+// Reste une fenêtre de quelques centaines de ms, entre l'appel à startWebEgress
+// et sa prise en compte côté LiveKit, où deux requêtes concurrentes passeraient.
+// Côté client `recordingLoading` désarme déjà le bouton pendant ce laps de temps.
+export async function findActiveRecordingEgress(roomName: string): Promise<ActiveRecording | null> {
+  let active: any[]
+  try {
+    active = await egressClient.listEgress({ active: true })
+  } catch {
+    // LiveKit injoignable : on ne bloque pas ici. startWebEgress échouera juste
+    // après et la route répondra 503 avec un message explicite.
+    return null
+  }
+
+  const match = active.find(e => isRecordingEgress(e) && egressRoomName(e) === roomName)
+  if (!match) return null
+
+  // startedAt est en nanosecondes, et vaut 0 tant que la capture n'a pas démarré.
+  const startedNs = Number(match.startedAt ?? 0)
+  return {
+    egressId: match.egressId,
+    startedAt: startedNs > 0 ? new Date(startedNs / 1_000_000) : null,
+  }
+}
+
 type RecLike = { id: string; egressId: string | null; status: string }
 
 // #2 — Réconcilie une ligne Recording bloquée en PROCESSING avec l'état réel de
