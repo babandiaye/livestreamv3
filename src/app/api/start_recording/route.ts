@@ -1,6 +1,7 @@
 import { EgressClient, EncodedFileOutput, EncodedFileType, S3Upload, EncodingOptions } from "livekit-server-sdk"
 import { getSessionFromReq, assertRoomCreator } from "@/lib/controller"
 import { findActiveRecordingEgress } from "@/lib/egress"
+import { appendEgressAccess } from "@/lib/egress-access"
 
 const egressClient = new EgressClient(
   process.env.LIVEKIT_WS_URL!.replace("wss://", "https://").replace("ws://", "http://"),
@@ -50,7 +51,12 @@ export async function POST(req: Request) {
     } as any)
 
     const baseUrl = process.env.NEXT_PUBLIC_SITE_URL!
-    const layoutUrl = `${baseUrl}/egress-layout?roomName=${encodeURIComponent(session.room_name)}`
+    // Mandat signé : /api/egress-token n'accepte de délivrer un jeton
+    // « hidden + recorder » qu'à un enregistreur lancé par nous (cf. egress-access).
+    const layoutUrl = appendEgressAccess(
+      `${baseUrl}/egress-layout?roomName=${encodeURIComponent(session.room_name)}`,
+      session.room_name
+    )
 
     // #4 — 1080p30 (au lieu de 60 fps / 6000 kbps) : largement suffisant pour un
     // cours, et bien moins coûteux en CPU/mémoire pour le Chrome egress, ce qui

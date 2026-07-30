@@ -82,15 +82,20 @@ function replayEvent(ctx: CanvasRenderingContext2D, ev: WBEvent) {
 export default function EgressLayoutClient() {
   const params = useSearchParams()
   const roomName = params.get("roomName") ?? ""
+  // Mandat d'enregistrement signé par start_recording : sans lui, la route
+  // refuse de délivrer le jeton « hidden + recorder » (cf. lib/egress-access).
+  const exp = params.get("exp") ?? ""
+  const sig = params.get("sig") ?? ""
   const [token, setToken] = useState<string | null>(null)
 
   useEffect(() => {
     if (!roomName) return
-    fetch(`/api/egress-token?roomName=${encodeURIComponent(roomName)}`)
+    const q = new URLSearchParams({ roomName, exp, sig })
+    fetch(`/api/egress-token?${q.toString()}`)
       .then(r => r.json())
       .then(d => setToken(d.token))
       .catch(console.error)
-  }, [roomName])
+  }, [roomName, exp, sig])
 
   if (!roomName || !token) {
     return <div style={{ background: "#0d1117", width: "1920px", height: "1080px" }} />
