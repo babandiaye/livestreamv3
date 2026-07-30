@@ -106,13 +106,29 @@ export async function reconcileRecording(rec: RecLike): Promise<string> {
   let list: any[] | undefined
   try {
     list = await egressClient.listEgress({ egressId: rec.egressId })
-  } catch {
-    return rec.status // LiveKit injoignable → on laisse tel quel, on réessaiera
+  } catch (e) {
+    // Distinction cruciale : LiveKit PURGE les egress terminés au bout d'un
+    // moment, et listEgress({egressId}) lève alors « egress does not exist »
+    // (vérifié empiriquement). Sans ce tri, TOUTE erreur retournait PROCESSING,
+    // rendant le bloc `if (!info)` ci-dessous INATTEIGNABLE : un enregistrement
+    // dont l'egress avait disparu restait PROCESSING pour toujours (blocages des
+    // 22-23-30/07). On distingue donc l'egress purgé du service injoignable.
+    const msg = e instanceof Error ? e.message.toLowerCase() : ""
+    if (msg.includes("does not exist") || msg.includes("not found")) {
+      // Egress purgé + fin jamais enregistrée (webhook egress_ended perdu). On
+      // marque FAILED : l'info n'expose plus de fichier. NB : un fichier a PEUT-
+      // ÊTRE été écrit sur S3 sans qu'on ait ses métadonnées (chemin {time}
+      // résolu côté LiveKit, inconnu ici) ; mieux vaut FAILED visible que
+      // PROCESSING éternel — l'admin peut retrouver un éventuel fichier sur MinIO.
+      await prisma.recording.update({ where: { id: rec.id }, data: { status: "FAILED" } })
+      return "FAILED"
+    }
+    return rec.status // injoignable/timeout → on laisse PROCESSING, on réessaiera
   }
 
   const info = list?.[0]
   if (!info) {
-    // L'egress n'existe plus côté LiveKit et aucune fin n'a été enregistrée → échec.
+    // Réponse vide sans exception (cas théorique) → même traitement que purgé.
     await prisma.recording.update({ where: { id: rec.id }, data: { status: "FAILED" } })
     return "FAILED"
   }
