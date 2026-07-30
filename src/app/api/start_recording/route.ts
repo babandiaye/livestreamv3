@@ -78,7 +78,11 @@ export async function POST(req: Request) {
       { encodingOptions } as any
     )
 
-    console.log("[start_recording] web egress started:", info.egressId, "url:", layoutUrl)
+    // Ne JAMAIS logguer layoutUrl : depuis la sécurisation d'egress-token, l'URL
+    // porte le mandat signé (exp + sig) valable plusieurs heures. Le journaliser
+    // rendrait ce mandat récupérable dans les logs applicatifs — soit l'écoute
+    // invisible que ce correctif ferme. room_name suffit au diagnostic.
+    console.log("[start_recording] web egress started:", info.egressId, "room:", session.room_name)
     return Response.json({ egress_id: info.egressId })
   } catch (err) {
     if (err instanceof Error && err.message === "FORBIDDEN")

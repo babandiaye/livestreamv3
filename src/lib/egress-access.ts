@@ -37,12 +37,23 @@ function sign(roomName: string, exp: number): string {
     .digest("base64url")
 }
 
-// TTL large (12 h) : le mandat doit rester valable si le Chrome de l'egress
-// recharge sa page en cours de captation — un cours peut durer plusieurs heures.
-// Le risque reste borné : la signature ne vaut que pour UNE salle nommée.
+// TTL (4 h) : le mandat doit rester valable si le Chrome de l'egress recharge sa
+// page en cours de captation. 4 h couvre une séance longue tout en réduisant la
+// fenêtre de rejeu au tiers des 12 h initiales.
+// ⚠ Si un enregistrement dépasse 4 h ET que le Chrome recharge sa page passé ce
+// délai, il redemanderait un jeton et échouerait (403). Non observé à ce jour ;
+// à surveiller sur les captations très longues, remonter le TTL le cas échéant.
+//
+// PÉRIMÈTRE EXACT du mandat : la signature couvre (roomName, exp), donc elle vaut
+// pour la salle nommée ET pour TOUTE séance de cette salle jusqu'à expiration.
+// Comme les salles sont réutilisées d'un cours à l'autre, un mandat capté peut
+// couvrir plusieurs séances dans la fenêtre du TTL. Le lier à l'egressId serait
+// plus strict mais impossible : l'URL est construite AVANT la création de
+// l'egress. Un lien à la séance imposerait un nonce stocké (état côté serveur),
+// ce qui sacrifierait le design sans état — arbitrage assumé.
 export function signEgressAccess(
   roomName: string,
-  ttlSec = 43_200
+  ttlSec = 14_400
 ): { exp: number; sig: string } {
   const exp = Math.floor(Date.now() / 1000) + ttlSec
   return { exp, sig: sign(roomName, exp) }
