@@ -1,4 +1,5 @@
 import { EgressClient, EgressStatus } from "livekit-server-sdk"
+import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3"
 import { prisma } from "@/lib/prisma"
 
 // Client egress partagé (utilisé par le webhook, la réconciliation et les routes
@@ -19,26 +20,118 @@ export function isRecordingEgress(egress: any): boolean {
   return false
 }
 
-// Applique les résultats d'un egress terminé à la ligne Recording : READY si un
-// fichier est présent, FAILED sinon.
-async function finalizeFromInfo(recordingId: string, egress: any): Promise<"READY" | "FAILED"> {
-  const fileResults = egress?.fileResults
-  if (fileResults && fileResults.length > 0) {
-    const file = fileResults[0]
-    const s3Key = file.filename ?? ""
-    const filename = s3Key.split("/").pop() ?? s3Key
-    const size = file.size ? BigInt(file.size.toString()) : null
-    const duration = file.duration ? Math.round(Number(file.duration) / 1_000_000_000) : null
-    await prisma.recording.update({
-      where: { id: recordingId },
-      data: { s3Key, filename, size, duration, status: "READY" },
+// A3 — Le stockage est l'arbitre final. Un egress peut annoncer un fichier
+// (fileResults) sans l'avoir réellement monté sur le bucket (upload échoué,
+// egress avorté). On confronte donc la clé au stockage :
+//   present : l'objet existe avec une taille > 0
+//   absent  : 404 / NoSuchKey, ou taille nulle
+//   unknown : stockage injoignable (réseau, 5xx, permission) → on ne tranche pas
+async function objectPresence(bucket: string, key: string): Promise<"present" | "absent" | "unknown"> {
+  if (!bucket || !key) return "unknown"
+  try {
+    const s3 = new S3Client({
+      region: process.env.S3_REGION || "us-east-1",
+      endpoint: process.env.S3_ENDPOINT,
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY!,
+        secretAccessKey: process.env.S3_SECRET!,
+      },
+      forcePathStyle: true,
     })
+    const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+    return (head.ContentLength ?? 0) > 0 ? "present" : "absent"
+  } catch (e: any) {
+    const notFound =
+      e?.$metadata?.httpStatusCode === 404 ||
+      /NotFound|NoSuchKey/i.test(String(e?.name ?? e?.Code ?? ""))
+    if (notFound) return "absent"
+    console.warn("[finalize] HeadObject injoignable:", bucket, key, e instanceof Error ? e.message : e)
+    return "unknown"
+  }
+}
+
+export type EgressOutcome = {
+  status: "READY" | "FAILED" | "PROCESSING"
+  s3Key: string
+  filename: string
+  size: bigint | null
+  duration: number | null
+  reason: string | null
+}
+
+// A1+A2+A3 — Cœur UNIQUE de finalisation, partagé par le webhook egress_ended et
+// la réconciliation (avant, chaque chemin dupliquait la logique — et le défaut du
+// faux READY). READY exige TROIS conditions (modèle suitenumerique/meet) :
+//   1. egress.status ∈ {EGRESS_COMPLETE, EGRESS_LIMIT_REACHED} ;
+//   2. fileResults[0].size > 0 (taille annoncée non nulle) ;
+//   3. l'objet existe RÉELLEMENT sur le stockage (objectPresence === "present").
+// Un egress FAILED/ABORTED, ou un « complete » sans fichier monté, donne FAILED
+// (fin du faux READY). Si le stockage est injoignable, on renvoie PROCESSING : on
+// ne conclut pas sur une incertitude, la réconciliation réessaiera.
+export async function computeEgressOutcome(egress: any): Promise<EgressOutcome> {
+  const fileResults = egress?.fileResults
+  const file = Array.isArray(fileResults) && fileResults.length > 0 ? fileResults[0] : null
+  const s3Key = file?.filename ?? ""
+  const filename = s3Key.split("/").pop() ?? s3Key
+  const size = file?.size ? BigInt(file.size.toString()) : null
+  const duration = file?.duration ? Math.round(Number(file.duration) / 1_000_000_000) : null
+  const reason = egress?.error ? String(egress.error) : null
+  const fields = { s3Key, filename, size, duration, reason }
+
+  const status = egress?.status
+  // Encore en cours : ne devrait pas arriver sur egress_ended, mais protège la
+  // réconciliation d'un passage prématuré en FAILED.
+  if (
+    status === EgressStatus.EGRESS_STARTING ||
+    status === EgressStatus.EGRESS_ACTIVE ||
+    status === EgressStatus.EGRESS_ENDING
+  ) {
+    return { status: "PROCESSING", ...fields }
+  }
+
+  // 1. Seuls COMPLETE et LIMIT_REACHED peuvent avoir produit un fichier exploitable.
+  const producedFile =
+    status === EgressStatus.EGRESS_COMPLETE || status === EgressStatus.EGRESS_LIMIT_REACHED
+  if (!producedFile) return { status: "FAILED", ...fields } // FAILED / ABORTED
+
+  // 2. Taille annoncée > 0.
+  if (!size || size <= BigInt(0)) return { status: "FAILED", ...fields }
+
+  // 3. Confirmation par le stockage (l'arbitre final).
+  const bucket = process.env.S3_BUCKET ?? ""
+  const presence = await objectPresence(bucket, s3Key)
+  if (presence === "present") return { status: "READY", ...fields }
+  if (presence === "absent") return { status: "FAILED", ...fields }
+  return { status: "PROCESSING", ...fields } // injoignable → réessai ultérieur
+}
+
+// Applique l'issue calculée à la ligne Recording, de façon IDEMPOTENTE (A4) : on
+// ne finalise QUE depuis PROCESSING. Un READY/FAILED déjà écrit n'est jamais
+// réécrit — indispensable quand le webhook ET la réconciliation traitent le même
+// egress. Renvoie le statut final (ou l'ancien si rien n'a changé).
+export async function finalizeRecording(rec: RecLike, egress: any): Promise<string> {
+  if (rec.status !== "PROCESSING") return rec.status
+
+  const outcome = await computeEgressOutcome(egress)
+  if (outcome.status === "PROCESSING") return rec.status // incertitude → on réessaiera
+
+  if (outcome.status === "READY") {
+    await prisma.recording.update({
+      where: { id: rec.id },
+      data: {
+        s3Key: outcome.s3Key,
+        filename: outcome.filename,
+        size: outcome.size,
+        duration: outcome.duration,
+        status: "READY",
+      },
+    })
+    console.log("[finalize] READY:", outcome.filename, rec.egressId)
     return "READY"
   }
-  await prisma.recording.update({
-    where: { id: recordingId },
-    data: { status: "FAILED" },
-  })
+
+  await prisma.recording.update({ where: { id: rec.id }, data: { status: "FAILED" } })
+  console.warn("[finalize] FAILED:", rec.egressId, "— motif:", outcome.reason ?? "sans fichier valide")
   return "FAILED"
 }
 
@@ -133,17 +226,9 @@ export async function reconcileRecording(rec: RecLike): Promise<string> {
     return "FAILED"
   }
 
-  switch (info.status) {
-    case EgressStatus.EGRESS_COMPLETE:
-      return await finalizeFromInfo(rec.id, info)
-    case EgressStatus.EGRESS_FAILED:
-    case EgressStatus.EGRESS_ABORTED:
-    case EgressStatus.EGRESS_LIMIT_REACHED:
-      await prisma.recording.update({ where: { id: rec.id }, data: { status: "FAILED" } })
-      return "FAILED"
-    default:
-      return rec.status // EGRESS_STARTING / EGRESS_ACTIVE / EGRESS_ENDING → encore en cours
-  }
+  // Chemin de finalisation UNIQUE (statut + taille + existence réelle du fichier).
+  // Les états en cours (STARTING/ACTIVE/ENDING) en ressortent PROCESSING inchangés.
+  return await finalizeRecording(rec, info)
 }
 
 // Réconcilie en lot les enregistrements PROCESSING plus vieux que `olderThanMs`

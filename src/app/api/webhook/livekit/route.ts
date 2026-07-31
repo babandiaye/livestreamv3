@@ -1,6 +1,6 @@
 import { WebhookReceiver } from "livekit-server-sdk"
 import { prisma } from "@/lib/prisma"
-import { egressClient, isRecordingEgress } from "@/lib/egress"
+import { egressClient, isRecordingEgress, computeEgressOutcome, finalizeRecording } from "@/lib/egress"
 import { recordJoin, recordLeave, closeOrphans } from "@/lib/attendance"
 import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
@@ -136,56 +136,38 @@ export async function POST(req: NextRequest) {
       }
       console.log("[webhook] egress_ended:", egress.egressId, "status:", egress.status, "room:", roomName)
 
-      const fileResults = egress.fileResults
-      if (fileResults && fileResults.length > 0) {
-        const file = fileResults[0]
-        const s3Key = file.filename ?? ""
-        const filename = s3Key.split("/").pop() ?? s3Key
-        const size = file.size ? BigInt(file.size.toString()) : null
-        const duration = file.duration
-          ? Math.round(Number(file.duration) / 1_000_000_000)
-          : null
-
-        const existing = await prisma.recording.findFirst({
-          where: { egressId: egress.egressId },
-        })
-
-        if (existing) {
-          await prisma.recording.update({
-            where: { id: existing.id },
-            data: { s3Key, filename, size, duration, status: "READY" },
-          })
-          console.log("[webhook] Recording READY:", filename)
-        } else {
-          const dbSession = roomName
-            ? await prisma.session.findUnique({ where: { roomName } })
-            : null
-          if (dbSession) {
-            await prisma.recording.create({
-              data: {
-                sessionId: dbSession.id,
-                s3Key,
-                s3Bucket: process.env.S3_BUCKET ?? "preprod-webinairerecordings",
-                filename,
-                size,
-                duration,
-                egressId: egress.egressId,
-                status: "READY",
-              },
-            })
-            console.log("[webhook] Recording READY (fallback):", filename)
-          }
-        }
+      // A1 — Finalisation via le cœur UNIQUE (statut egress + taille + existence
+      // réelle du fichier sur le stockage). Plus de READY sur la seule présence de
+      // fileResults : un egress FAILED/ABORTED, ou un fichier jamais monté sur le
+      // bucket, donne désormais FAILED (fin du faux READY).
+      const existing = await prisma.recording.findFirst({
+        where: { egressId: egress.egressId },
+      })
+      if (existing) {
+        await finalizeRecording(existing, egress)
       } else {
-        const existing = await prisma.recording.findFirst({
-          where: { egressId: egress.egressId },
-        })
-        if (existing) {
-          await prisma.recording.update({
-            where: { id: existing.id },
-            data: { status: "FAILED" },
+        // Fallback : egress_started manqué → on crée la ligne avec l'issue calculée,
+        // pour que même un échec reste visible (pas de disparition silencieuse).
+        const outcome = await computeEgressOutcome(egress)
+        const dbSession = roomName
+          ? await prisma.session.findUnique({ where: { roomName } })
+          : null
+        if (dbSession) {
+          const ready = outcome.status === "READY"
+          await prisma.recording.create({
+            data: {
+              sessionId: dbSession.id,
+              s3Key: ready ? outcome.s3Key : "",
+              s3Bucket: process.env.S3_BUCKET ?? "preprod-webinairerecordings",
+              filename: ready ? outcome.filename : "Enregistrement échoué",
+              size: ready ? outcome.size : null,
+              duration: ready ? outcome.duration : null,
+              egressId: egress.egressId,
+              // Stockage injoignable → PROCESSING, la réconciliation tranchera.
+              status: outcome.status,
+            },
           })
-          console.log("[webhook] Recording FAILED:", egress.egressId)
+          console.log("[webhook] Recording créé (fallback):", outcome.status, egress.egressId)
         }
       }
     }
