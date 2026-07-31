@@ -250,6 +250,14 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
       localParticipant.setMicrophoneEnabled(false);
       localParticipant.setScreenShareEnabled(false);
       setShareOn(false);
+    } else {
+      // Invité sur scène : on OUVRE le micro par défaut (la caméra reste coupée
+      // pour les spectateurs — perf réseau, cf. plus bas). getUserMedia peut
+      // demander l'autorisation micro au navigateur ; en cas de refus/échec, le
+      // participant garde le bouton micro pour réessayer manuellement.
+      localParticipant
+        .setMicrophoneEnabled(true, { noiseSuppression: true, echoCancellation: true, autoGainControl: true })
+        .catch(() => {});
     }
   }, [onStage]);
 

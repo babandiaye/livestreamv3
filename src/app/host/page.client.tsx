@@ -711,7 +711,6 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
                         <div className="h-pname">
                           {p.name || p.identity}
                           {handRaised && <span className="h-hand-icon" title="Demande de prise de parole">✋</span>}
-                          {meta.invited_to_stage && <span className="h-stage-icon" title="Sur scène">🎤</span>}
                           {isHost && <span className="h-ptag">Vous</span>}
                         </div>
                       </div>
@@ -729,7 +728,9 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
                         </button>
                       )}
                       {!isHost && meta.invited_to_stage && (
-                        <button className="h-pmute" onClick={() => muteParticipant(p.identity, p.name || p.identity)}>Couper micro</button>
+                        <button className="h-pmute" onClick={() => muteParticipant(p.identity, p.name || p.identity)} title="Couper le micro" aria-label="Couper le micro">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                        </button>
                       )}
                       {!isHost && meta.invited_to_stage && (
                         <button className="h-premove" onClick={() => removeFromStage(p.identity)}>Retirer</button>
@@ -988,7 +989,6 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-pname{font-size:0.85rem;font-weight:500;display:flex;align-items:center;gap:6px;color:#e2e8f0;}
         .h-ptag{font-size:0.65rem;background:rgba(59,130,246,.2);color:#60a5fa;padding:1px 6px;border-radius:4px;font-weight:600;}
         .h-hand-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(251,191,36,.22);font-size:0.7rem;line-height:1;flex-shrink:0;}
-        .h-stage-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(34,197,94,.2);font-size:0.7rem;line-height:1;flex-shrink:0;}
         .h-pinvite{padding:4px 10px;background:rgba(59,130,246,.12);color:#60a5fa;border:1px solid rgba(59,130,246,.3);border-radius:5px;font-size:0.72rem;cursor:pointer;font-family:inherit;transition:background .15s;}
         .h-pinvite:hover:not(:disabled){background:#3b82f6;color:white;border-color:#3b82f6;}
         .h-pinvite:disabled{opacity:.4;cursor:not-allowed;}
@@ -1046,7 +1046,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-obs-copyrow button{padding:9px 14px;background:#1e2d3d;border:1px solid #2d3f52;border-radius:8px;color:#e2e8f0;cursor:pointer;font-family:inherit;font-size:0.8rem;font-weight:600;white-space:nowrap;}
         .h-obs-copyrow button:hover{background:#243447;}
         .h-obs-hint{font-size:0.78rem;color:#64748b;line-height:1.5;background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.18);border-radius:8px;padding:10px 12px;}
-        .h-pmute{padding:4px 10px;background:rgba(251,191,36,.14);color:#fbbf24;border:1px solid rgba(251,191,36,.35);border-radius:5px;font-size:0.72rem;cursor:pointer;font-family:inherit;transition:background .15s;}
+        .h-pmute{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background:rgba(251,191,36,.14);color:#fbbf24;border:1px solid rgba(251,191,36,.35);border-radius:6px;cursor:pointer;font-family:inherit;transition:background .15s,color .15s;flex-shrink:0;}
         .h-pmute:hover{background:#fbbf24;color:#1a1a2e;border-color:#fbbf24;}
         .h-mod-toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:#111827;border:1px solid #2d3f52;color:#e2e8f0;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:400;}
 
