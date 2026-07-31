@@ -190,19 +190,23 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   };
 
   const startRecording = async (): Promise<string | null> => {
-    const hasCamera = localParticipant.isCameraEnabled;
-    const hasScreen = tracks.some(
-      t => t.source === Track.Source.ScreenShare &&
-           t.participant.identity === localParticipant.identity
+    // A1 — Verrou basé sur la SALLE entière, pas sur mes seules pistes. Un
+    // co-animateur doit pouvoir enregistrer dès qu'une source existe dans la
+    // salle (ex. l'écran partagé par l'hôte), même s'il n'a ni caméra ni partage
+    // à lui. `tracks` (useTracks) couvre déjà tous les participants.
+    const hasVideoSource = tracks.some(
+      t => (t.source === Track.Source.Camera || t.source === Track.Source.ScreenShare) &&
+           t.publication?.track && !t.publication.isMuted
     );
     const hasWhiteboard = showWhiteboard;
 
-    if (!hasCamera && !hasScreen && !hasWhiteboard) {
-      alert("Activez votre caméra, partagez votre écran ou ouvrez le tableau blanc avant de démarrer l'enregistrement.");
+    if (!hasVideoSource && !hasWhiteboard) {
+      alert("Aucune source à enregistrer : une caméra ou un partage d'écran doit être actif dans la salle (le vôtre ou celui d'un autre animateur), ou le tableau blanc ouvert.");
       return null;
     }
 
-    // Étape 1 : Vérifier que le flux vidéo est réellement actif
+    // Étape 1 : Vérifier que le flux vidéo est réellement actif (à l'échelle de
+    // la salle, pas seulement local).
     setRecordingWaiting(true);
 
     const checkSignalReady = (): Promise<boolean> => {
@@ -212,11 +216,10 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         const check = () => {
           attempts++;
           const hasActiveTrack = tracks.some(t => {
-            const isLocal = t.participant.identity === localParticipant.identity;
             const isVideo =
               t.source === Track.Source.Camera ||
               t.source === Track.Source.ScreenShare;
-            return isLocal && isVideo && t.publication?.track && !t.publication.isMuted;
+            return isVideo && t.publication?.track && !t.publication.isMuted;
           });
           if (hasActiveTrack || hasWhiteboard) {
             resolve(true);
@@ -258,6 +261,14 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           setRecordingStartTime(Number.isNaN(startedMs) ? Date.now() : startedMs);
           return data.egress_id;
         }
+      }
+
+      // A2 — 422 : la garde-source serveur a refusé (aucune source dans la salle).
+      if (res.status === 422) {
+        const data = await res.json().catch(() => null);
+        alert(data?.message || "Aucune source à enregistrer.");
+        setRecordingWaiting(false);
+        return null;
       }
 
       if (!res.ok) {
@@ -377,10 +388,16 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     // Arrêter le streaming RTMP si actif
     if (streaming) await stopStreaming();
     // Fermer la room
-    await fetch("/api/stop_stream", {
+    const res = await fetch("/api/stop_stream", {
       method: "POST",
       headers: { Authorization: `Bearer ${authToken}` },
     });
+    if (!res.ok) {
+      // Correctif 3 — plus de faux succès silencieux : si l'arrêt a échoué côté
+      // serveur (403 non-animateur, 502 LiveKit injoignable), on prévient.
+      const txt = await res.text().catch(() => "");
+      alert(txt || "La session n'a pas pu être arrêtée.");
+    }
     window.location.href = returnUrl;
   };
 
@@ -454,6 +471,15 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const stageCamTracks = camTracks.filter(t => stageParts.some(p => p.identity === t.participant.identity));
   const stageAudioTracks = tracks.filter(t => t.source === Track.Source.Microphone && t.participant.identity !== localParticipant.identity);
 
+  // A1 — une source existe-t-elle dans la SALLE (n'importe quel animateur) ?
+  // caméra ou partage d'écran actif, ou tableau blanc ouvert. Sert au tooltip du
+  // bouton d'enregistrement et à la validation de source (co-animateur inclus).
+  const hasRoomSource =
+    tracks.some(t =>
+      (t.source === Track.Source.Camera || t.source === Track.Source.ScreenShare) &&
+      t.publication?.track && !t.publication.isMuted
+    ) || showWhiteboard;
+
   const mainContent = showWhiteboard ? "whiteboard" : screenTrack ? "screen" : ingressCamTrack ? "ingress" : localCamTrack ? "cam" : "avatar";
 
   // Tri de la liste : les demandes de prise de parole (main levée, pas encore sur scène) remontent en tête
@@ -495,7 +521,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
             className={`h-btn-rec${recording ? " active" : ""}`}
             onClick={recording ? stopRecording : startRecording}
             disabled={recordingLoading || recordingWaiting}
-            title={!camOn && !shareOn && !showWhiteboard ? "Activez la caméra, partagez l'écran ou ouvrez le tableau avant d'enregistrer" : ""}
+            title={!hasRoomSource ? "Une caméra/partage d'écran doit être actif dans la salle, ou le tableau blanc ouvert, avant d'enregistrer" : ""}
           >
             {recordingWaiting
               ? <><span className="h-rec-spinner" /> Préparation…</>
@@ -831,11 +857,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           onStreamingStop={() => { setStreamingEgressId(null); setStreaming(false); setStreamingFailed(false); }}
           onStreamingFailed={handleStreamingFailed}
           onRecordingStart={startRecording}
-          onValidateSource={() =>
-            localParticipant.isCameraEnabled ||
-            tracks.some(t => t.source === Track.Source.ScreenShare && t.participant.identity === localParticipant.identity) ||
-            showWhiteboard
-          }
+          onValidateSource={() => hasRoomSource}
           isStreaming={streaming}
           streamingEgressId={streamingEgressId}
           onClose={() => setShowStreamingDialog(false)}

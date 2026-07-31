@@ -1,5 +1,5 @@
 import { EgressClient } from "livekit-server-sdk";
-import { getSessionFromReq, assertRoomCreator } from "@/lib/controller";
+import { getSessionFromReq, assertRoomHost } from "@/lib/controller";
 
 const egressClient = new EgressClient(
   process.env.LIVEKIT_WS_URL!.replace("wss://", "https://").replace("ws://", "http://"),
@@ -10,7 +10,7 @@ const egressClient = new EgressClient(
 export async function POST(req: Request) {
   try {
     const session = await getSessionFromReq(req);
-    await assertRoomCreator(session); // C2 — seul l'animateur peut arrêter l'enregistrement
+    await assertRoomHost(session); // C2 — seul l'animateur peut arrêter l'enregistrement
     const { egress_id } = await req.json();
     if (!egress_id) return new Response("egress_id required", { status: 400 });
     const info = await egressClient.stopEgress(egress_id);

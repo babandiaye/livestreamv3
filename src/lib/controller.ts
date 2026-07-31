@@ -126,12 +126,42 @@ export async function getSessionFromReq(req: Request): Promise<Session> {
   };
 }
 
-// ─── Autorisation créateur (C2) ─────────────────────────────────────────────────
+// ─── Autorisation animateur (C2) ─────────────────────────────────────────────────
 
-// Vérifie que l'appelant est le créateur de la salle (creator_identity dans les
-// métadonnées). Lève "FORBIDDEN" sinon. À appeler après getSessionFromReq sur les
-// actions réservées à l'animateur (kick, enregistrement, diffusion).
-export async function assertRoomCreator(session: Session): Promise<void> {
+// Lit isModerator dans les métadonnées d'un participant LiveKit. Ces métadonnées
+// sont frappées côté serveur au moment d'émettre le jeton ; un spectateur ne peut
+// pas se les attribuer (defaultPermission pose canUpdateMetadata: false, et aucun
+// jeton n'accorde canUpdateOwnMetadata).
+// ⚠ Toute route qui appellerait updateParticipant en reconstruisant les métadonnées
+// doit préserver ce champ, sous peine d'ouvrir une élévation de privilège.
+function hasModeratorMetadata(metadata?: string | null): boolean {
+  if (!metadata) return false;
+  try {
+    return (JSON.parse(metadata) as { isModerator?: boolean }).isModerator === true;
+  } catch {
+    return false;
+  }
+}
+
+// Vérifie que l'appelant a les droits d'animateur sur la salle. Lève "FORBIDDEN"
+// sinon. À appeler après getSessionFromReq sur les actions réservées à l'animateur
+// (kick, enregistrement, diffusion, tableau blanc).
+//
+// Deux voies, volontairement en OU — c'est un SUR-ENSEMBLE de l'ancienne règle
+// « seul le créateur », donc aucun usage qui fonctionnait ne peut se retrouver
+// bloqué :
+//
+//  1. creator_identity — celui qui a démarré la session. Conservé tel quel, et
+//     indispensable au-delà du confort : /host arrête l'enregistrement sur
+//     `pagehide`, à l'instant où l'animateur quitte la salle. Il n'est alors DÉJÀ
+//     PLUS dans listParticipants ; sans cette voie, la requête échouerait en 403
+//     et la capture continuerait jusqu'à la fermeture de la salle (empty_timeout
+//     300 s, ou indéfiniment si un spectateur reste connecté).
+//  2. tout modérateur ACTUELLEMENT CONNECTÉ (isModerator dans ses métadonnées) —
+//     c'est ce qui fait le co-animateur : un second admin/modérateur qui rejoint
+//     une session déjà démarrée dispose des mêmes droits, sans déposséder le
+//     premier.
+export async function assertRoomHost(session: Session): Promise<void> {
   const httpUrl = process.env.LIVEKIT_WS_URL!
     .replace("wss://", "https://")
     .replace("ws://", "http://");
@@ -149,9 +179,13 @@ export async function assertRoomCreator(session: Session): Promise<void> {
   } catch {
     creator_identity = undefined;
   }
-  if (!creator_identity || creator_identity !== session.identity) {
-    throw new Error("FORBIDDEN");
-  }
+  if (creator_identity && creator_identity === session.identity) return;
+
+  const participants = await roomService.listParticipants(session.room_name);
+  const me = participants.find((p) => p.identity === session.identity);
+  if (me && hasModeratorMetadata(me.metadata)) return;
+
+  throw new Error("FORBIDDEN");
 }
 
 // ─── Présence d'un modérateur ─────────────────────────────────────────────────
@@ -188,10 +222,17 @@ async function queryModeratorPresence(room_name: string): Promise<boolean> {
   } catch {
     creator_identity = undefined;
   }
+  // Métadonnées vides = salle auto-créée par l'arrivée d'un spectateur : personne
+  // ne l'anime, la condition 2 ci-dessous ne trouvera aucun modérateur non plus.
   if (!creator_identity) return false;
 
   const participants = await roomService.listParticipants(room_name);
-  return participants.some((p) => p.identity === creator_identity);
+  // Élargi au co-animateur : le créateur OU n'importe quel modérateur connecté
+  // tient la salle. Sans ce OU, le départ de celui qui a démarré renverrait tous
+  // les spectateurs en salle d'attente alors qu'un autre modérateur anime encore.
+  return participants.some(
+    (p) => p.identity === creator_identity || hasModeratorMetadata(p.metadata)
+  );
 }
 
 // Cache + regroupement des appels concurrents.
@@ -354,15 +395,36 @@ export class Controller {
   async createStream({ metadata, room_name, user_id }: CreateStreamParams): Promise<CreateStreamResponse> {
     if (!room_name) room_name = generateRoomId();
 
-    await this.roomService.createRoom({
-      name: room_name,
-      metadata: JSON.stringify(metadata),
-    });
-    // createRoom est un no-op si la salle existe déjà (ex. auto-créée vide parce
-    // qu'un spectateur a rejoint /watch avant le démarrage) : dans ce cas il
-    // n'écrase PAS les métadonnées. On force donc creator_identity ici, sinon
-    // inviteToStage/kick/enregistrement échouent faute de créateur identifiable.
-    await this.roomService.updateRoomMetadata(room_name, JSON.stringify(metadata));
+    // Une salle déjà démarrée garde SON créateur : le second animateur rejoint,
+    // il ne reprend pas la salle. Sans cette lecture préalable, l'ancien
+    // updateRoomMetadata inconditionnel transférait creator_identity au dernier
+    // arrivé, et le premier perdait silencieusement l'enregistrement, l'exclusion
+    // et l'arrêt. Il reste co-animateur par la métadonnée isModerator de son
+    // jeton (cf. assertRoomHost).
+    // Effet de bord assumé : en mode rejoindre, enable_chat / allow_participation
+    // restent ceux fixés au démarrage — les modifier ne prendra effet qu'à la
+    // prochaine ouverture de la salle.
+    let existingCreator: string | undefined;
+    try {
+      const existing = await this.roomService.listRooms([room_name]);
+      existingCreator = existing.length
+        ? (JSON.parse(existing[0].metadata || "{}") as RoomMetadata).creator_identity
+        : undefined;
+    } catch {
+      existingCreator = undefined;
+    }
+
+    if (!existingCreator) {
+      await this.roomService.createRoom({
+        name: room_name,
+        metadata: JSON.stringify(metadata),
+      });
+      // createRoom est un no-op si la salle existe déjà (ex. auto-créée vide parce
+      // qu'un spectateur a rejoint /watch avant le démarrage) : dans ce cas il
+      // n'écrase PAS les métadonnées. On force donc creator_identity ici, sinon
+      // inviteToStage/kick/enregistrement échouent faute de créateur identifiable.
+      await this.roomService.updateRoomMetadata(room_name, JSON.stringify(metadata));
+    }
 
     // L'animateur figure dans la liste de présence en tant que modérateur.
     const attendee: Record<string, unknown> = { isModerator: true };
@@ -391,10 +453,7 @@ export class Controller {
   }
 
   async stopStream(session: Session) {
-    const rooms = await this.roomService.listRooms([session.room_name]);
-    if (rooms.length === 0) throw new Error("Room does not exist");
-    const creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
-    if (creator_identity !== session.identity) throw new Error("Only the creator can stop the stream");
+    await assertRoomHost(session); // créateur OU co-animateur connecté
     await this.roomService.deleteRoom(session.room_name);
   }
 
@@ -440,10 +499,7 @@ export class Controller {
   }
 
   async inviteToStage(session: Session, { identity }: InviteToStageParams) {
-    const rooms = await this.roomService.listRooms([session.room_name]);
-    if (rooms.length === 0) throw new Error("Room does not exist");
-    const creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
-    if (creator_identity !== session.identity) throw new Error("Only the creator can invite to stage");
+    await assertRoomHost(session); // créateur OU co-animateur connecté
 
     const participant = await this.roomService.getParticipant(session.room_name, identity);
     const permission = participant.permission ?? defaultPermission();
@@ -467,11 +523,10 @@ export class Controller {
   async removeFromStage(session: Session, { identity }: RemoveFromStageParams) {
     if (!identity) identity = session.identity;
 
-    const rooms = await this.roomService.listRooms([session.room_name]);
-    if (rooms.length === 0) throw new Error("Room does not exist");
-    const creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
-    if (creator_identity !== session.identity && identity !== session.identity) {
-      throw new Error("Only the creator or the participant can remove from stage");
+    // Un participant peut TOUJOURS se retirer lui-même de la scène : on ne
+    // demande les droits d'animateur que pour retirer QUELQU'UN D'AUTRE.
+    if (identity !== session.identity) {
+      await assertRoomHost(session); // créateur OU co-animateur connecté
     }
 
     const participant = await this.roomService.getParticipant(session.room_name, identity);

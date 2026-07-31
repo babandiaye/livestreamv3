@@ -1,4 +1,4 @@
-import { Controller, getSessionFromReq, assertRoomCreator } from "@/lib/controller";
+import { Controller, getSessionFromReq, assertRoomHost } from "@/lib/controller";
 
 // Bascule l'état du tableau blanc via les métadonnées de room (state sync).
 // Protégée par le pattern C2 : token vérifié + assertion créateur — seul
@@ -8,7 +8,7 @@ export async function POST(req: Request) {
   const controller = new Controller();
   try {
     const session = await getSessionFromReq(req);
-    await assertRoomCreator(session);
+    await assertRoomHost(session);
     const { open } = await req.json();
     await controller.setWhiteboardOpen(session, open === true);
     return Response.json({});

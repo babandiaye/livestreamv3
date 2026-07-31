@@ -1,4 +1,4 @@
-import { Controller, getSessionFromReq, assertRoomCreator } from "@/lib/controller";
+import { Controller, getSessionFromReq, assertRoomHost } from "@/lib/controller";
 
 // Diffusion OBS (ingress RTMP/WHIP) vers le salon courant. Appelée depuis /host
 // avec le token Bearer de l'animateur — même modèle d'auth que les autres actions
@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   const controller = new Controller();
   try {
     const session = await getSessionFromReq(req);
-    await assertRoomCreator(session); // seul l'animateur du salon peut créer un ingress
+    await assertRoomHost(session); // seul l'animateur du salon peut créer un ingress
     const { ingress_type } = (await req.json()) as { ingress_type?: string };
 
     const response = await controller.createIngress({

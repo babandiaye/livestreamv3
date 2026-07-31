@@ -1,5 +1,5 @@
 import { EgressClient } from "livekit-server-sdk";
-import { getSessionFromReq, assertRoomCreator } from "@/lib/controller";
+import { getSessionFromReq, assertRoomHost } from "@/lib/controller";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     );
 
     const session = await getSessionFromReq(req);
-    await assertRoomCreator(session); // C2 — seul l'animateur peut arrêter la diffusion
+    await assertRoomHost(session); // C2 — seul l'animateur peut arrêter la diffusion
     const { egress_id } = await req.json() as { egress_id: string };
 
     if (!egress_id) return new Response("egress_id requis", { status: 400 });

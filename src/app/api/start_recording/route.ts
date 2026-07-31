@@ -1,5 +1,5 @@
-import { EgressClient, EncodedFileOutput, EncodedFileType, S3Upload, EncodingOptions } from "livekit-server-sdk"
-import { getSessionFromReq, assertRoomCreator } from "@/lib/controller"
+import { EgressClient, EncodedFileOutput, EncodedFileType, S3Upload, EncodingOptions, RoomServiceClient, TrackSource } from "livekit-server-sdk"
+import { getSessionFromReq, assertRoomHost } from "@/lib/controller"
 import { findActiveRecordingEgress } from "@/lib/egress"
 import { appendEgressAccess } from "@/lib/egress-access"
 
@@ -12,7 +12,7 @@ const egressClient = new EgressClient(
 export async function POST(req: Request) {
   try {
     const session = await getSessionFromReq(req)
-    await assertRoomCreator(session) // C2 — seul l'animateur peut enregistrer
+    await assertRoomHost(session) // C2 — créateur OU co-animateur connecté peut enregistrer
 
     // #6 — Verrou anti-doublon. Côté client, le seul garde-fou était l'état React
     // `recording` : un rafraîchissement de l'onglet /host le remet à false alors
@@ -34,6 +34,44 @@ export async function POST(req: Request) {
         },
         { status: 409 }
       )
+    }
+
+    // A2 — Garde-source serveur. L'egress n'a AUCUNE vérification native qu'une
+    // source existe : sur une salle vide, le Chrome enregistre une page blanche
+    // et finit souvent en « page load error: timed out ». On confirme donc côté
+    // serveur qu'au moins une source est présente — une piste vidéo publiée par
+    // n'importe quel animateur, OU le tableau blanc ouvert. Non contournable
+    // (contrairement au verrou client) et ferme la cause des egress ratés (R5.6).
+    try {
+      const httpUrl = process.env.LIVEKIT_WS_URL!
+        .replace("wss://", "https://").replace("ws://", "http://")
+      const roomService = new RoomServiceClient(
+        httpUrl, process.env.LIVEKIT_API_KEY!, process.env.LIVEKIT_API_SECRET!
+      )
+      const rooms = await roomService.listRooms([session.room_name])
+      let whiteboardOpen = false
+      try { whiteboardOpen = JSON.parse(rooms[0]?.metadata || "{}").whiteboard_open === true } catch {}
+      const participants = await roomService.listParticipants(session.room_name)
+      const hasVideoSource = participants.some(p =>
+        (p.tracks ?? []).some(t =>
+          (t.source === TrackSource.CAMERA || t.source === TrackSource.SCREEN_SHARE) && !t.muted
+        )
+      )
+      if (!hasVideoSource && !whiteboardOpen) {
+        console.log("[start_recording] refusé (aucune source):", session.room_name)
+        return Response.json(
+          {
+            error: "NO_SOURCE",
+            message: "Aucune source à enregistrer : activez une caméra, partagez un écran ou ouvrez le tableau blanc.",
+          },
+          { status: 422 }
+        )
+      }
+    } catch (e) {
+      // LiveKit injoignable : on ne bloque pas sur l'incertitude (le verrou client
+      // a déjà filtré ; un egress réellement vide finira FAILED via le palier A).
+      // startWebEgress échouera juste après avec un 503 explicite si besoin.
+      console.warn("[start_recording] garde-source ignorée (LiveKit injoignable):", e instanceof Error ? e.message : e)
     }
 
     const s3 = new S3Upload({

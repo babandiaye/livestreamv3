@@ -470,9 +470,12 @@ export default function AdminClient({
                       <div className="dash-actions" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                         <button
                           onClick={(e) => { e.stopPropagation(); startMeeting(room) }}
-                          style={{ ...iconBtn, padding: "5px 12px", background: "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ ...iconBtn, padding: "5px 12px", background: room.status === "LIVE" ? "#16a34a" : "#0065b1", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
                         >
-                          <Play size={15} /> Démarrer
+                          {/* Session déjà en cours : on la REJOINT en co-animateur,
+                              on ne la redémarre pas. Même appel côté serveur, devenu
+                              idempotent (le créateur et startedAt sont préservés). */}
+                          <Play size={15} /> {room.status === "LIVE" ? "Rejoindre" : "Démarrer"}
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); copyLink(room.roomName) }}

@@ -129,7 +129,8 @@ function EgressRoom() {
   const currentReqId = useRef<string | null>(null)
   const [showWhiteboard, setShowWhiteboard] = useState(false)
   const room = useRoomContext()
-  // Correctif 4 : n'accepter les tracés que du créateur de la salle.
+  // Correctif 4 (co-animateur) : n'accepter les tracés QUE d'un animateur — le
+  // créateur OU tout modérateur connecté (cf. isHostParticipant plus bas).
   const creatorIdentity = useMemo(() => {
     try { return (JSON.parse(egressRoomMeta || "{}") as { creator_identity?: string }).creator_identity }
     catch { return undefined }
@@ -162,6 +163,16 @@ function EgressRoom() {
 
   // Recevoir events tableau blanc via data channels — filtré par topic
   useEffect(() => {
+    // Point 3 (co-animateur) : le créateur OU tout modérateur connecté (isModerator
+    // dans ses métadonnées LiveKit, frappées côté serveur — un spectateur ne peut
+    // pas se les attribuer) peut piloter le tableau blanc de l'enregistrement.
+    // Avant, seul le créateur était accepté, donc les tracés d'un co-animateur
+    // n'apparaissaient jamais dans le fichier.
+    const isHostParticipant = (p: any): boolean => {
+      if (!p) return false
+      if (creatorIdentity && p.identity === creatorIdentity) return true
+      try { return JSON.parse(p.metadata || "{}").isModerator === true } catch { return false }
+    }
     const handleData = (payload: Uint8Array, participant: any, _kind: any, topic?: string) => {
       // Ne traiter que les messages whiteboard
       if (topic !== WB_TOPIC && topic !== undefined) return
@@ -180,10 +191,10 @@ function EgressRoom() {
 
         if (msg.type === "init") {
           // N'accepter que : réponse à NOTRE demande (reqId), ou push autoritaire
-          // du créateur sans reqId (correctif 4).
+          // d'un animateur sans reqId (créateur ou co-animateur — correctif 4).
           const isResponseToMe = !!msg.reqId && msg.reqId === currentReqId.current
-          const isCreatorPush  = !msg.reqId && !!creatorIdentity && participant?.identity === creatorIdentity
-          if (!isResponseToMe && !isCreatorPush) return
+          const isHostPush     = !msg.reqId && isHostParticipant(participant)
+          if (!isResponseToMe && !isHostPush) return
           if (msg.seq === 0) ctx.clearRect(0, 0, canvas.width, canvas.height)
           for (const ev of msg.events) replayEvent(ctx, ev)
           if (msg.events.length > 0) setShowWhiteboard(true)
@@ -191,8 +202,9 @@ function EgressRoom() {
           return
         }
 
-        // Mutations de contenu (draw/shape/text/clear) : réservées au créateur (correctif 4).
-        if (creatorIdentity && participant?.identity !== creatorIdentity) return
+        // Mutations de contenu (draw/shape/text/clear) : réservées à un animateur
+        // (créateur ou co-animateur connecté — correctif 4).
+        if (!isHostParticipant(participant)) return
 
         if (msg.type === "clear") {
           replayEvent(ctx, msg)

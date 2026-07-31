@@ -38,21 +38,61 @@ export async function POST(req: NextRequest) {
     enable_chat: true,
     allow_participation: false,
   })
-  await roomService.createRoom({ name: room.roomName, metadata: roomMetadata })
-  // createRoom n'écrase pas les métadonnées d'une salle déjà auto-créée (vide) :
-  // on force donc creator_identity, sinon l'animateur ne peut pas inviter/exclure.
-  await roomService.updateRoomMetadata(room.roomName, roomMetadata)
 
-  // Mettre à jour le statut
-  await prisma.session.update({
-    where: { id: roomId },
-    data: { status: "LIVE", startedAt: new Date() },
-  })
+  // DÉMARRER ou REJOINDRE ? La décision se prend sur l'état réel de la salle côté
+  // LiveKit, jamais sur Session.status : ce statut reste bloqué à LIVE quand le
+  // webhook room_finished est perdu (même raison qui a fait écrire
+  // isModeratorPresent). S'y fier ferait fusionner deux séances distinctes.
+  let existingCreator: string | undefined
+  try {
+    const existing = await roomService.listRooms([room.roomName])
+    existingCreator = existing.length
+      ? JSON.parse(existing[0].metadata || "{}").creator_identity
+      : undefined
+  } catch {
+    existingCreator = undefined
+  }
 
+  if (existingCreator) {
+    // REJOINDRE — on ne touche NI aux métadonnées de la salle (le premier
+    // animateur reste créateur) NI à startedAt : le re-estampiller scinderait la
+    // feuille de présence en deux cycles, puisque recordJoin copie startedAt à
+    // chaque connexion. On réaligne seulement un statut qui aurait dérivé.
+    await prisma.session.updateMany({
+      where: { id: roomId, status: { not: "LIVE" } },
+      data: { status: "LIVE" }, // sans startedAt, volontairement
+    })
+  } else {
+    // DÉMARRER — salle absente, ou auto-créée sans créateur par un spectateur.
+    await roomService.createRoom({ name: room.roomName, metadata: roomMetadata })
+    // createRoom n'écrase pas les métadonnées d'une salle déjà auto-créée (vide) :
+    // on force donc creator_identity, sinon l'animateur ne peut pas inviter/exclure.
+    await roomService.updateRoomMetadata(room.roomName, roomMetadata)
+
+    await prisma.session.update({
+      where: { id: roomId },
+      data: { status: "LIVE", startedAt: new Date() },
+    })
+  }
+
+  // Métadonnées d'animateur sur le jeton de connexion. Elles manquaient : un
+  // enseignant venu de Moodle n'était donc ni reconnu comme co-animateur par
+  // assertRoomHost, ni marqué modérateur dans la feuille de présence (recordJoin
+  // lit isModerator ici même). Frappées côté serveur : un spectateur ne peut pas
+  // se les attribuer.
   const at = new AccessToken(
     process.env.LIVEKIT_API_KEY!,
     process.env.LIVEKIT_API_SECRET!,
-    { identity: moderatorEmail, name: moderatorName, ttl: "8h" }
+    {
+      identity: moderatorEmail,
+      name: moderatorName,
+      ttl: "8h",
+      metadata: JSON.stringify({
+        isModerator: true,
+        userId: moderator.id,
+        email: moderatorEmail,
+      }),
+    }
   )
   at.addGrant({
     room: room.roomName,

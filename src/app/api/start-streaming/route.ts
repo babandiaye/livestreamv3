@@ -1,5 +1,5 @@
 import { EgressClient, StreamOutput, StreamProtocol, EncodingOptionsPreset } from "livekit-server-sdk";
-import { getSessionFromReq, assertRoomCreator } from "@/lib/controller";
+import { getSessionFromReq, assertRoomHost } from "@/lib/controller";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     );
 
     const session = await getSessionFromReq(req);
-    await assertRoomCreator(session); // C2 — seul l'animateur peut diffuser
+    await assertRoomHost(session); // C2 — seul l'animateur peut diffuser
     const { destinations } = await req.json() as {
       destinations: { url: string; key: string }[];
     };

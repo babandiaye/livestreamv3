@@ -1,11 +1,11 @@
-import { Controller, getSessionFromReq, assertRoomCreator } from "@/lib/controller";
+import { Controller, getSessionFromReq, assertRoomHost } from "@/lib/controller";
 import { NextRequest } from "next/server";
 
 export async function POST(req: NextRequest) {
   const controller = new Controller();
   try {
     const session = await getSessionFromReq(req);
-    await assertRoomCreator(session); // C2 — seul l'animateur peut exclure
+    await assertRoomHost(session); // C2 — seul l'animateur peut exclure
     const { identity } = await req.json();
     if (!identity) return new Response("identity requis", { status: 400 });
     await controller.kickParticipant(session.room_name, identity);
