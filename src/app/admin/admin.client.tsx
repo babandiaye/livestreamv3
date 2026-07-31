@@ -87,6 +87,7 @@ export default function AdminClient({
 }) {
   const [nav, setNav] = useState<"rooms" | "users" | "recordings" | "status" | "settings">("rooms")
   const [blockStudents, setBlockStudents] = useState(false)
+  const [moodleAutoModerator, setMoodleAutoModerator] = useState(true)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [savingSetting, setSavingSetting] = useState(false)
   const [users, setUsers] = useState<UserRecord[]>([])
@@ -153,6 +154,7 @@ export default function AdminClient({
     if (res.ok) {
       const d = await res.json()
       setBlockStudents(Boolean(d.blockStudents))
+      setMoodleAutoModerator(Boolean(d.moodleAutoModerator))
     }
     setSettingsLoaded(true)
   }, [])
@@ -179,6 +181,24 @@ export default function AdminClient({
       else { const d = await res.json(); setBlockStudents(Boolean(d.blockStudents)) }
     } catch {
       setBlockStudents(!value); alert("Échec de l'enregistrement du réglage")
+    } finally {
+      setSavingSetting(false)
+    }
+  }
+
+  const toggleMoodleAutoModerator = async (value: boolean) => {
+    setMoodleAutoModerator(value)
+    setSavingSetting(true)
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moodleAutoModerator: value }),
+      })
+      if (!res.ok) { setMoodleAutoModerator(!value); alert("Échec de l'enregistrement du réglage") }
+      else { const d = await res.json(); setMoodleAutoModerator(Boolean(d.moodleAutoModerator)) }
+    } catch {
+      setMoodleAutoModerator(!value); alert("Échec de l'enregistrement du réglage")
     } finally {
       setSavingSetting(false)
     }
@@ -776,12 +796,20 @@ export default function AdminClient({
                 </div>
 
                 {!settingsLoaded ? <Spinner /> : (
-                  <ToggleRow
-                    label={savingSetting ? "Interdire l'accès aux étudiants (enregistrement…)" : "Interdire l'accès aux étudiants"}
-                    desc="Quand activé, un étudiant (affiliation « Etudiant ») ne peut plus se connecter directement à la plateforme : il est redirigé vers une page l'invitant à passer par l'ENT ou Moodle. L'accès via un lien Moodle reste possible. Les comptes sans ce champ ne sont pas concernés."
-                    checked={blockStudents}
-                    onChange={toggleBlockStudents}
-                  />
+                  <>
+                    <ToggleRow
+                      label={savingSetting ? "Interdire l'accès aux étudiants (enregistrement…)" : "Interdire l'accès aux étudiants"}
+                      desc="Quand activé, un étudiant (affiliation « Etudiant ») ne peut plus se connecter directement à la plateforme : il est redirigé vers une page l'invitant à passer par l'ENT ou Moodle. L'accès via un lien Moodle reste possible. Les comptes sans ce champ ne sont pas concernés."
+                      checked={blockStudents}
+                      onChange={toggleBlockStudents}
+                    />
+                    <ToggleRow
+                      label={savingSetting ? "Animateur Moodle automatique (enregistrement…)" : "Animateur Moodle automatique"}
+                      desc="Quand activé, un enseignant ou tuteur qui démarre une session depuis Moodle obtient automatiquement un compte modérateur ici, sans devoir s'être connecté au préalable. Moodle a déjà vérifié son droit d'animer le cours. Désactivez pour revenir à l'attribution manuelle du rôle : les enseignants sans compte modérateur verront alors leur session refusée."
+                      checked={moodleAutoModerator}
+                      onChange={toggleMoodleAutoModerator}
+                    />
+                  </>
                 )}
               </div>
             </div>

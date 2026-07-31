@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { validateMoodleKey } from "@/lib/moodle-auth"
+import { ensureMoodleModerator } from "@/lib/moodle-moderator"
 import { prisma } from "@/lib/prisma"
 
 export const dynamic = "force-dynamic"
@@ -8,14 +9,18 @@ export async function POST(req: NextRequest) {
   const authError = validateMoodleKey(req)
   if (authError) return authError
 
-  const { courseId, meetingId, title, description, moderatorEmail } = await req.json()
+  const { courseId, meetingId, title, description, moderatorEmail, moderatorName } = await req.json()
 
   if (!courseId || !title || !moderatorEmail)
     return NextResponse.json({ error: "courseId, title et moderatorEmail requis" }, { status: 400 })
 
-  const moderator = await prisma.user.findUnique({
-    where: { email: moderatorEmail },
-  })
+  // Crée le compte animateur s'il n'existe pas encore. Auparavant, un enseignant
+  // qui n'avait jamais ouvert la plateforme voyait la création de son activité
+  // Moodle échouer (404), et l'activité était annulée par le rollback du plugin.
+  // moderatorName est facultatif : les versions du plugin antérieures à 1.2.9 ne
+  // l'envoient pas, le helper retombe alors sur la partie locale de l'email.
+  // La plateforme reste donc déployable indépendamment du plugin.
+  const moderator = await ensureMoodleModerator(moderatorEmail, moderatorName)
   if (!moderator)
     return NextResponse.json({ error: "Modérateur introuvable — doit se connecter une fois sur la plateforme" }, { status: 404 })
 

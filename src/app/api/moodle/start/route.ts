@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { validateMoodleKey } from "@/lib/moodle-auth"
+import { ensureMoodleModerator } from "@/lib/moodle-moderator"
 import { prisma } from "@/lib/prisma"
 import { AccessToken } from "livekit-server-sdk"
 import { RoomServiceClient } from "livekit-server-sdk"
@@ -19,7 +20,12 @@ export async function POST(req: NextRequest) {
   if (!room)
     return NextResponse.json({ error: "Salle introuvable" }, { status: 404 })
 
-  const moderator = await prisma.user.findUnique({ where: { email: moderatorEmail } })
+  // Crée le compte s'il n'existe pas, promeut un VIEWER en MODERATOR (jamais de
+  // rétrogradation d'un ADMIN). Sans cela, un enseignant qui n'avait jamais
+  // ouvert la plateforme ne pouvait pas démarrer sa propre session. Le contrôle
+  // de rôle ci-dessous reste en place : il redevient bloquant si un
+  // administrateur coupe le provisionnement automatique.
+  const moderator = await ensureMoodleModerator(moderatorEmail, moderatorName)
   if (!moderator || !["ADMIN", "MODERATOR"].includes(moderator.role))
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 })
 

@@ -5,10 +5,15 @@ import { prisma } from "@/lib/prisma"
 // dispersées dans le code.
 
 export const SETTING_BLOCK_STUDENTS = "block_students"
+export const SETTING_MOODLE_AUTO_MODERATOR = "moodle_auto_moderator"
 
 // Valeur par défaut de chaque réglage quand la ligne n'existe pas encore.
+// moodle_auto_moderator est à "on" : sans lui, un enseignant qui n'a jamais
+// ouvert la plateforme ne peut ni créer ni démarrer sa session (404/403), ce qui
+// est précisément le blocage à corriger. L'interrupteur sert de coupe-circuit.
 const DEFAULTS: Record<string, string> = {
   [SETTING_BLOCK_STUDENTS]: "off",
+  [SETTING_MOODLE_AUTO_MODERATOR]: "on",
 }
 
 /** Lit un réglage brut (repli sur la valeur par défaut si absent). */
@@ -20,6 +25,11 @@ export async function getSetting(key: string): Promise<string> {
 /** true si l'accès étudiant est actuellement interdit. */
 export async function isStudentBlockEnabled(): Promise<boolean> {
   return (await getSetting(SETTING_BLOCK_STUDENTS)) === "on"
+}
+
+/** true si un enseignant venu de Moodle est provisionné/promu automatiquement. */
+export async function isMoodleAutoModeratorEnabled(): Promise<boolean> {
+  return (await getSetting(SETTING_MOODLE_AUTO_MODERATOR)) === "on"
 }
 
 /** Écrit un réglage (upsert). */

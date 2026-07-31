@@ -1,5 +1,5 @@
 import { auth } from "@/auth"
-import { getSetting, setSetting, SETTING_BLOCK_STUDENTS } from "@/lib/settings"
+import { getSetting, setSetting, SETTING_BLOCK_STUDENTS, SETTING_MOODLE_AUTO_MODERATOR } from "@/lib/settings"
 import { NextResponse } from "next/server"
 
 export const dynamic = "force-dynamic"
@@ -13,6 +13,7 @@ export async function GET() {
 
   return NextResponse.json({
     blockStudents: (await getSetting(SETTING_BLOCK_STUDENTS)) === "on",
+    moodleAutoModerator: (await getSetting(SETTING_MOODLE_AUTO_MODERATOR)) === "on",
   })
 }
 
@@ -27,7 +28,12 @@ export async function PATCH(req: Request) {
     await setSetting(SETTING_BLOCK_STUDENTS, body.blockStudents ? "on" : "off")
   }
 
+  if (typeof body.moodleAutoModerator === "boolean") {
+    await setSetting(SETTING_MOODLE_AUTO_MODERATOR, body.moodleAutoModerator ? "on" : "off")
+  }
+
   return NextResponse.json({
     blockStudents: (await getSetting(SETTING_BLOCK_STUDENTS)) === "on",
+    moodleAutoModerator: (await getSetting(SETTING_MOODLE_AUTO_MODERATOR)) === "on",
   })
 }
