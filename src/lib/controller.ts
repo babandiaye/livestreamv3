@@ -188,6 +188,38 @@ export async function assertRoomHost(session: Session): Promise<void> {
   throw new Error("FORBIDDEN");
 }
 
+// Reste-t-il un AUTRE animateur connecté que l'appelant ? (créateur ou modérateur
+// via isModerator, identité != la sienne). Sert à avertir avant « Quitter » : si
+// c'est le dernier animateur, la session resterait sans pilote.
+// En cas d'incertitude (LiveKit injoignable), renvoie false → l'appelant avertit
+// (choix conservateur : mieux vaut un avertissement de trop qu'une session
+// abandonnée sans prévenir).
+export async function hasOtherHostConnected(session: Session): Promise<boolean> {
+  const httpUrl = process.env.LIVEKIT_WS_URL!
+    .replace("wss://", "https://")
+    .replace("ws://", "http://");
+  const roomService = new RoomServiceClient(
+    httpUrl,
+    process.env.LIVEKIT_API_KEY!,
+    process.env.LIVEKIT_API_SECRET!
+  );
+  let creator_identity: string | undefined;
+  try {
+    const rooms = await roomService.listRooms([session.room_name]);
+    creator_identity = rooms.length
+      ? (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity
+      : undefined;
+    const participants = await roomService.listParticipants(session.room_name);
+    return participants.some(
+      (p) =>
+        p.identity !== session.identity &&
+        (p.identity === creator_identity || hasModeratorMetadata(p.metadata))
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ─── Présence d'un modérateur ─────────────────────────────────────────────────
 
 // Un spectateur ne doit pas pouvoir entrer dans une salle sans animateur.

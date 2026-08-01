@@ -1,4 +1,4 @@
-import { WebhookReceiver } from "livekit-server-sdk"
+import { WebhookReceiver, RoomServiceClient, EgressStatus } from "livekit-server-sdk"
 import { prisma } from "@/lib/prisma"
 import { egressClient, isRecordingEgress, computeEgressOutcome, finalizeRecording } from "@/lib/egress"
 import { recordJoin, recordLeave, closeOrphans } from "@/lib/attendance"
@@ -6,6 +6,12 @@ import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 
 const receiver = new WebhookReceiver(
+  process.env.LIVEKIT_API_KEY!,
+  process.env.LIVEKIT_API_SECRET!
+)
+
+const roomService = new RoomServiceClient(
+  process.env.LIVEKIT_WS_URL!.replace("wss://", "https://").replace("ws://", "http://"),
   process.env.LIVEKIT_API_KEY!,
   process.env.LIVEKIT_API_SECRET!
 )
@@ -168,6 +174,19 @@ export async function POST(req: NextRequest) {
             },
           })
           console.log("[webhook] Recording créé (fallback):", outcome.status, egress.egressId)
+        }
+      }
+
+      // Limite de durée atteinte (session_limits.file_output_max_duration = 3h) :
+      // l'enregistrement est plafonné → on termine AUSSI toute la session (choix
+      // produit : à 3h, la session s'arrête). deleteRoom déclenche room_finished,
+      // qui marque ENDED, referme la présence et arrête tout egress résiduel.
+      if (egress.status === EgressStatus.EGRESS_LIMIT_REACHED && roomName) {
+        try {
+          await roomService.deleteRoom(roomName)
+          console.log("[webhook] limite 3h atteinte → session terminée:", roomName)
+        } catch (e) {
+          console.warn("[webhook] deleteRoom (limite 3h) ignoré:", roomName, e instanceof Error ? e.message : e)
         }
       }
     }

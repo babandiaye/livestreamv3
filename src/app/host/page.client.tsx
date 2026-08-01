@@ -55,6 +55,8 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const [recordingWaiting, setRecordingWaiting] = useState(false);
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
   const [recordingElapsed, setRecordingElapsed] = useState("00:00");
+  const [endWarning, setEndWarning] = useState(false); // alerte 2h50 (arrêt auto à 3h)
+  const warnedRef = useRef(false);
 
   const [streamingEgressId, setStreamingEgressId] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
@@ -74,10 +76,20 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   useEffect(() => {
     if (!recording || !recordingStartTime) {
       setRecordingElapsed("00:00");
+      warnedRef.current = false;
+      setEndWarning(false);
       return;
     }
     const interval = setInterval(() => {
       const diff = Math.floor((Date.now() - recordingStartTime) / 1000);
+      // Alerte à 2h50 : l'egress est plafonné à 3h côté serveur (session_limits) ;
+      // à l'échéance, toute la session s'arrête automatiquement. On prévient les
+      // animateurs ~10 min avant (une seule fois).
+      if (diff >= 10200 && !warnedRef.current) { // 2h50 (plafond egress = 3h)
+        warnedRef.current = true;
+        setEndWarning(true);
+        showModToast("Enregistrement à 2h50 — la session s'arrêtera automatiquement dans ~10 min");
+      }
       const h = Math.floor(diff / 3600);
       const m = Math.floor((diff % 3600) / 60);
       const s = diff % 60;
@@ -337,32 +349,13 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     } finally { setRecordingLoading(false); }
   };
 
-  // #3 — Filet de sécurité côté client : si l'animateur ferme l'onglet / quitte la
-  // page alors qu'un egress (enregistrement ou diffusion RTMP) tourne encore, on
-  // tente de l'arrêter en best-effort via une requête « keepalive » (qui survit à
-  // la fermeture de la page). Le webhook room_finished reste le filet principal.
-  useEffect(() => {
-    const handler = () => {
-      try {
-        if (egressId) {
-          fetch("/api/stop_recording", {
-            method: "POST", keepalive: true,
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-            body: JSON.stringify({ egress_id: egressId }),
-          });
-        }
-        if (streamingEgressId) {
-          fetch("/api/stop-streaming", {
-            method: "POST", keepalive: true,
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-            body: JSON.stringify({ egress_id: streamingEgressId }),
-          });
-        }
-      } catch { /* best-effort */ }
-    };
-    window.addEventListener("pagehide", handler);
-    return () => window.removeEventListener("pagehide", handler);
-  }, [egressId, streamingEgressId, authToken]);
+  // NB — l'ancien filet `pagehide` (qui arrêtait l'egress à la fermeture de
+  // l'onglet) a été RETIRÉ : avec le co-animateur, l'enregistrement est une
+  // ressource de SESSION, pas d'un animateur. Le couper au départ d'un seul
+  // animateur (« Quitter », ou fermeture accidentelle) casserait la capture pour
+  // ceux qui restent. L'arrêt de l'enregistrement se fait désormais uniquement
+  // par « Terminer », par le plafond 3 h (session_limits), ou par room_finished
+  // (empty_timeout) ; la réconciliation cron reste le filet final.
 
   // Arrêter le streaming RTMP
   const stopStreaming = async () => {
@@ -381,8 +374,10 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     setStreamingFailed(false);
   };
 
+  // Terminer — ferme la session POUR TOUT LE MONDE : arrête l'enregistrement,
+  // supprime la salle. Action destructive (bouton rouge).
   const stopStream = async () => {
-    if (!confirm("Arrêter le stream pour tout le monde ?")) return;
+    if (!confirm("Terminer la session pour tout le monde ? La salle sera fermée et l'enregistrement arrêté.")) return;
     // Arrêter l'enregistrement si actif
     if (recording) await stopRecording();
     // Arrêter le streaming RTMP si actif
@@ -398,6 +393,24 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
       const txt = await res.text().catch(() => "");
       alert(txt || "La session n'a pas pu être arrêtée.");
     }
+    window.location.href = returnUrl;
+  };
+
+  // Quitter — l'animateur SORT de la session sans la détruire : la salle et
+  // l'enregistrement continuent pour les autres. On se contente de se déconnecter
+  // (participant_left ferme sa présence) ; on ne touche NI à l'egress NI à la room.
+  const leaveSession = async () => {
+    // Reste-t-il un autre animateur ? (vérif serveur) → avertissement adapté.
+    let otherHost = false;
+    try {
+      const r = await fetch("/api/other-hosts", { headers: { Authorization: `Bearer ${authToken}` } });
+      if (r.ok) otherHost = (await r.json()).otherHost === true;
+    } catch { otherHost = false; }
+    const msg = otherHost
+      ? "Quitter la session ? Elle reste ouverte pour les autres animateurs (l'enregistrement continue). Pour tout arrêter, utilisez « Terminer »."
+      : "Vous êtes le DERNIER animateur. Si vous quittez, la session restera ouverte SANS animateur et l'enregistrement continuera (jusqu'à 3 h max). Pour tout arrêter proprement, utilisez « Terminer ».\n\nQuitter quand même ?";
+    if (!confirm(msg)) return;
+    try { await room.disconnect(); } catch { /* best-effort */ }
     window.location.href = returnUrl;
   };
 
@@ -810,10 +823,17 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
           </div>
 
           <div className="h-ctrl-btn-wrap">
-            <button className="h-ctrl-btn quit" onClick={stopStream}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.61 21 3 13.39 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.46.57 3.58a1 1 0 0 1-.25 1.01l-2.2 2.2z" transform="rotate(135 12 12)"/></svg>
+            <button className="h-ctrl-btn leave" onClick={leaveSession} title="Quitter sans fermer la session">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             </button>
             <span className="h-ctrl-label">Quitter</span>
+          </div>
+
+          <div className="h-ctrl-btn-wrap">
+            <button className="h-ctrl-btn quit" onClick={stopStream} title="Terminer la session pour tout le monde">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.61 21 3 13.39 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.46.57 3.58a1 1 0 0 1-.25 1.01l-2.2 2.2z" transform="rotate(135 12 12)"/></svg>
+            </button>
+            <span className="h-ctrl-label">Terminer</span>
           </div>
 
           <div className="h-ctrl-btn-wrap">
@@ -918,6 +938,12 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
 
       {modToast && (
         <div className="h-mod-toast">{modToast}</div>
+      )}
+
+      {endWarning && (
+        <div className="h-end-warning">
+          ⚠ L&apos;enregistrement approche de 3&nbsp;h — la session s&apos;arrêtera automatiquement dans ~10&nbsp;min.
+        </div>
       )}
 
       <style>{`
@@ -1049,6 +1075,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-pmute{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background:rgba(251,191,36,.14);color:#fbbf24;border:1px solid rgba(251,191,36,.35);border-radius:6px;cursor:pointer;font-family:inherit;transition:background .15s,color .15s;flex-shrink:0;}
         .h-pmute:hover{background:#fbbf24;color:#1a1a2e;border-color:#fbbf24;}
         .h-mod-toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:#111827;border:1px solid #2d3f52;color:#e2e8f0;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:400;}
+        .h-end-warning{position:fixed;top:16px;left:50%;transform:translateX(-50%);max-width:92vw;background:#78350f;border:1px solid #f59e0b;color:#fde68a;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:500;text-align:center;}
 
         /* ===== Responsive ===== Éléments propres au mobile, masqués sur desktop.
            Toutes les règles ci-dessous sont confinées sous media queries : au-delà
