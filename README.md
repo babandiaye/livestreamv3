@@ -506,15 +506,17 @@ Toutes les routes exigent le header `X-Api-Key: <MOODLE_API_KEY>`.
 
 | Méthode | Route | Description |
 |---------|-------|-------------|
-| POST | `/api/moodle/rooms` | Créer ou récupérer une salle |
+| POST | `/api/moodle/rooms` | Créer une salle (provisionne l'animateur si besoin) |
 | GET | `/api/moodle/rooms/[id]/status` | Statut de la salle |
 | GET | `/api/moodle/rooms/[id]/recordings` | Liste des enregistrements |
-| POST | `/api/moodle/join` | Rejoindre en tant qu'étudiant |
-| POST | `/api/moodle/start` | Démarrer en tant que modérateur |
+| POST | `/api/moodle/join` | Rejoindre en tant qu'étudiant (auto-provision `VIEWER`) |
+| POST | `/api/moodle/start` | Démarrer/rejoindre en tant que modérateur |
 | POST | `/api/moodle/enroll` | Enrôlement masse depuis Moodle |
 | DELETE | `/api/moodle/recordings/[id]` | Supprimer un enregistrement |
 
 > Le plugin identifie sa salle par le `roomid` renvoyé à la création, qu'il **mémorise** avec l'hôte de l'`apiurl` (colonne `roomapihost`, plugin ≥ 1.2.7). Changer l'URL du backend (préprod ↔ prod) rend ce `roomid` caduc : le plugin le détecte, oublie le lien et propose « Créer la salle » sur le backend courant. Un `404` sur `/status` déclenche la même auto-réparation.
+
+> **Provisionnement de l'animateur (plugin ≥ 1.2.9).** `rooms` et `start` reçoivent `moderatorName` (le `fullname` Moodle) et **créent le compte animateur** s'il n'existe pas (rôle `MODERATOR`), ou promeuvent un `VIEWER` — jamais de rétrogradation d'un `ADMIN` (`lib/moodle-moderator.ts`). Un enseignant qui n'a jamais ouvert la plateforme peut ainsi créer/démarrer sa session. C'est le même niveau de confiance que le provisionnement étudiant (`join`) : appel authentifié par `MOODLE_API_KEY`, capacité `mod/livestream:moderate` déjà vérifiée côté plugin. Piloté par le réglage `moodle_auto_moderator` (cf. Paramètres). `moderatorName` est **facultatif** côté backend (compatible plugins < 1.2.9).
 
 ### Routes d'administration (session ADMIN requise)
 
@@ -541,6 +543,16 @@ Toutes les routes exigent le header `X-Api-Key: <MOODLE_API_KEY>`.
 | `MODERATOR` | `/moderator` | Ses salles, enrôlement CSV/individuel, ses enregistrements |
 | `VIEWER` | `/student` | Sessions auxquelles il est enrôlé |
 
+> Un `MODERATOR` voit **ses salles + celles où il est enrôlé** (`/api/admin/rooms`) : un enseignant auto-enrôlé sur un cours Moodle voit donc ce cours et peut le **Démarrer** (hors ligne) ou le **Rejoindre** (déjà LIVE).
+
+### Rôle plateforme vs rôle session (co-animateur)
+
+Il faut distinguer le **rôle du compte** (`ADMIN`/`MODERATOR`/`VIEWER`, ci-dessus) du **rôle dans une session** (animateur / participant) :
+
+- L'autorisation des actions d'animateur (enregistrer, kick, diffuser, tableau blanc, arrêter) passe par **`assertRoomHost`** (`lib/controller.ts`) : est autorisé le **créateur** de la salle **OU tout modérateur connecté** (métadonnée `isModerator` du jeton). Un 2ᵉ `ADMIN`/`MODERATOR` qui **Rejoint** une session en cours devient donc **co-animateur** à parité, **sans déposséder** le premier.
+- Rejoindre une session déjà LIVE **ne réécrit pas** le `creator_identity` (`createStream`/`moodle/start` idempotents) : le créateur d'origine reste propriétaire.
+- Un `VIEWER` (étudiant) ne peut jamais animer ; il rejoint en **participant** (et peut être invité « sur scène » avec micro ouvert par défaut).
+
 ### Règle « étudiant » (claim Keycloak `affiliation`)
 
 Un compte dont l'ID token porte `"affiliation": "Etudiant"` est **toujours forcé en `VIEWER`**, quels que soient ses rôles Keycloak — un étudiant ne peut donc jamais être modérateur ni administrateur. Cette règle est **permanente** et indépendante du réglage de blocage ci-dessous.
@@ -566,6 +578,7 @@ Onglet **Paramètres** de `/admin` (ADMIN uniquement). Les réglages sont stock�
 | Clé | Valeurs | Défaut | Effet |
 |-----|---------|--------|-------|
 | `block_students` | `on` / `off` | `off` | Interdit la connexion **SSO directe** aux comptes `affiliation = Etudiant` |
+| `moodle_auto_moderator` | `on` / `off` | `on` | Provisionne/promeut automatiquement en `MODERATOR` l'enseignant qui crée/démarre une session depuis Moodle. `off` → attribution manuelle du rôle (l'enseignant sans compte modérateur voit sa session refusée). Le garde-fou `affiliation=Etudiant → VIEWER` reste appliqué à la connexion SSO. |
 
 Quand `block_students = on`, un étudiant qui tente de se connecter sur la plateforme est redirigé vers **`/acces-refuse`** (message + lien vers `https://ent.unchk.sn`) au lieu d'ouvrir une session.
 
@@ -586,6 +599,19 @@ Un lien `/watch/<salle>` ne donne accès à la session que si un **animateur est
 - Un cache de 5 s avec regroupement des appels concurrents absorbe la rafale de connexions simultanées (mesuré : 200 requêtes → 3 appels au SFU).
 
 > Le lien Moodle porteur d'un `?token=` déjà émis n'est verrouillé que **visuellement** : son jeton reste valide côté LiveKit. Le verrou serveur pour ce chemin relèverait de `/api/moodle/join`.
+
+---
+
+## Quitter / Terminer une session
+
+Sur `/host`, l'animateur dispose de **deux actions distinctes** (rendu possible par le co-animateur) :
+
+| Bouton | Effet |
+|--------|-------|
+| **Quitter** (discret) | L'animateur **se déconnecte** (`room.disconnect`) **sans détruire la salle** : la session et l'enregistrement **continuent** pour les autres. Sa présence est refermée (`participant_left`). Si c'est le **dernier animateur** (`/api/other-hosts` → `hasOtherHostConnected`), un **avertissement** prévient que la session restera sans pilote. |
+| **Terminer** (rouge) | Ferme la session **pour tout le monde** : arrêt de l'enregistrement + `deleteRoom` + `ENDED`. `stop_stream` supprime la salle **d'abord** et ne marque `ENDED` **que si l'arrêt a réussi** (403 non-animateur, 502 LiveKit injoignable) — plus de faux succès. |
+
+> Tout **animateur** (créateur ou co-animateur, via `assertRoomHost`) peut Quitter ou Terminer.
 
 ---
 
@@ -656,20 +682,43 @@ Le webhook ne crée une ligne `Recording` que pour les egress de **type fichier*
 (`isRecordingEgress`). Les diffusions RTMP (`room_composite`/stream) ne génèrent plus
 de faux enregistrement `FAILED`.
 
-**3. Arrêt automatique (anti-fuite).**
-Si l'animateur ferme l'onglet / perd le réseau sans cliquer sur « Stop », l'egress
-serait sinon resté actif indéfiniment. Deux filets :
-- côté serveur : le webhook `room_finished` arrête tout egress encore actif de la salle
-  (retrouvé via la base) — déclenché après `empty_timeout` (300 s, cf. `livekit-server.yaml`) ;
-- côté client : un handler `pagehide` envoie un `stop` *best-effort* (`fetch keepalive`).
+**3. Critère READY (fin du faux « disponible »).**
+Un enregistrement passe `READY` seulement si **les trois** conditions sont réunies
+(`lib/egress.ts`, chemin unique `finalizeRecording` partagé par le webhook et la
+réconciliation) : statut egress `EGRESS_COMPLETE`/`EGRESS_LIMIT_REACHED`, **taille > 0**,
+et **fichier réellement présent sur MinIO** (`HeadObject`). Sinon → `FAILED`. Un egress
+`FAILED`/`ABORTED` (ou un fichier jamais monté sur le bucket) ne peut plus être annoncé
+`READY` (approche inspirée de suitenumerique/meet). Finalisation **idempotente** (aucun
+écrasement d'un statut final).
 
-**4. Réconciliation des `PROCESSING` bloqués.**
+**4. Arrêt automatique (anti-fuite).**
+Le web egress n'étant pas lié au cycle de vie de la room, plusieurs filets :
+- **`stop_stream` arrête lui-même** l'egress `PROCESSING` de la session (idempotent),
+  sans dépendre du webhook — indispensable avec le co-animateur (l'état `recording` du
+  client n'est pas partagé entre animateurs) ;
+- le webhook `room_finished` arrête tout egress résiduel de la salle (après
+  `empty_timeout`, 300 s, cf. `livekit-server.yaml`) ;
+- ⚠️ l'ancien filet client `pagehide` a été **retiré** : l'enregistrement est une
+  ressource de **session**, pas d'un animateur — le couper au départ d'un seul cassait
+  la capture des autres.
+
+**5. Réconciliation ACTIVE des `PROCESSING` bloqués.**
 Si un webhook `egress_ended` est manqué, une ligne peut rester `PROCESSING`. Elle est
-réconciliée automatiquement avec l'état réel de LiveKit (`listEgress`) :
-- à l'affichage des listes (`/api/recordings/me`, `/api/admin/recordings`),
-- lors du polling de statut (`/api/recording-status`, après 60 s).
+réconciliée avec l'état réel de LiveKit (`listEgress`) :
+- par un **cron système** `/api/cron/reconcile-recordings` (protégé par `CRON_SECRET`,
+  comparaison à temps constant, ~toutes les 10 min) — indépendant de toute présence humaine ;
+- à l'affichage des listes (`/api/recordings/me`, `/api/admin/recordings`) et au polling
+  de statut (`/api/recording-status`, après 60 s).
+> Config système (hors git, à reproduire en prod) : `CRON_SECRET` dans `.env`,
+> `/usr/local/bin/livestream-reconcile.sh`, `/etc/cron.d/livestream-reconcile`.
 
-**5. Dépendance Redis / worker egress.**
+**6. Plafond de durée (3 h).**
+Cap serveur via `session_limits.file_output_max_duration: 3h` dans `/opt/livekit/egress.yaml`
+(**hors git — à répliquer sur la prod** + restart du conteneur egress). À l'échéance :
+`EGRESS_LIMIT_REACHED` → fichier finalisé `READY`, puis le webhook **termine toute la
+session** (`deleteRoom`). Côté animateur, une **alerte à 2h50** prévient de l'arrêt imminent.
+
+**7. Dépendance Redis / worker egress.**
 L'egress dépend de **Redis** et d'un worker disponible. S'ils sont indisponibles,
 `/api/start_recording` et `/api/start-streaming` renvoient **503** avec un message clair
 (au lieu d'une 500 opaque). Vérifier la stack :
@@ -717,6 +766,7 @@ docker logs livekit_egress --tail 50
 | **v1.1** | Sécurité : vérification de signature des tokens LiveKit, contrôle « créateur » sur les actions animateur (kick / enregistrement / diffusion / OBS), `create_stream` réservé aux animateurs, auto-provision des étudiants Moodle. UX : notification compacte des demandes de prise de parole + acceptation depuis la liste des participants. Diffusion **OBS (RTMP/WHIP)** réactivée depuis la page animateur. Retrait des identifiants de base codés en dur (`DATABASE_URL` requis). Flux Git **dev / main / prod**. |
 | **v1.2** | **Qualité vidéo** : options LiveKit centralisées (`lib/livekit-options.ts`) — adaptiveStream, dynacast, plafonds de publication ; suppression de la couche simulcast à demi-résolution du **partage d'écran** (slides illisibles côté participant). Correction ICE **STUN + TURN/UDP** côté SFU (voir Infrastructure) — cause racine du flou. **Responsivité** des pages `/host` et `/watch`. Caméra interdite aux spectateurs montés sur scène (micro + partage d'écran seulement). Tableau blanc : synchronisation d'historique robuste (chunking, anti-tempête, persistance locale, autorisation d'écriture). |
 | **v1.2.1** | **Accès** : un lien `/watch` requiert un **animateur réellement connecté** (403 `NO_MODERATOR` + écran d'information). **Présence** : suppression d'une séance ou d'un participant. **Chat** : export `.txt` de la transcription depuis `/host`. **Utilisateurs** : suppression (avec garde-fous), tris par date de création et par rôle. **Paramètres** : nouvelle table `AppSetting` + réglage « Interdire l'accès aux étudiants » (claim `affiliation`), page `/acces-refuse`. Règle permanente : un étudiant est toujours `VIEWER`. |
+| **v1.3** | **Enregistrements fiables** : verrou anti-doublon, sécurisation de `/api/egress-token` (mandat HMAC signé), critère `READY` = statut + taille > 0 + fichier réellement sur MinIO (`HeadObject`), réconciliation **active** par cron des `PROCESSING` bloqués. **Co-animateur** : `assertRoomHost` (créateur **ou** modérateur connecté), Démarrer/**Rejoindre** une session en cours sans dépossession, tableau blanc de l'egress ouvert à tout animateur. **Provisionnement Moodle** : l'enseignant/tuteur est auto-créé/promu `MODERATOR` (réglage `moodle_auto_moderator`). **Cycle de session** : boutons **Quitter** (sans détruire la salle) / **Terminer**, `stop_stream` sans faux succès. **Plafond 3 h** (`session_limits` egress) + alerte à 2h50. **Design** : bouton micro icône, micro ouvert par défaut sur scène. |
 
 ---
 
