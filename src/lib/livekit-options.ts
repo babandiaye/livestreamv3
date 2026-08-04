@@ -10,16 +10,16 @@ import type { RoomOptions, TrackPublishDefaults } from "livekit-client";
 //   transparent à ce débit sur une voix. NE PAS descendre à telephone (12 kb/s),
 //   là il y aurait une perte audible.
 // - dtx : défaut du SDK, rendu explicite — les silences ne consomment ~rien.
-// - red false : supprime le doublon systématique de chaque paquet audio. RED
-//   n'améliore pas la qualité nominale, seulement la résilience aux PERTES.
-//   ⚠ Arbitrage assumé : à surveiller sur les réseaux mobiles dégradés. Si des
-//   coupures audio remontent chez les étudiants, réactiver red: true dans
-//   viewerAudioDefaults UNIQUEMENT (le host est sur le réseau de l'université).
-//   Ne jamais compenser en abaissant le preset.
+// - red TRUE (réactivé le 01/08/2026) : RED double chaque paquet audio et permet
+//   au récepteur de reconstruire les paquets perdus. Il avait été désactivé le
+//   28/07 pour économiser la bande passante, mais des MICRO-COUPURES audio sont
+//   remontées en PROD → on privilégie la résilience. Coût : ~2× le débit audio
+//   (voix ~24 → ~48 kb/s par abonné), négligeable face à la vidéo.
+//   Ne jamais compenser une coupure en abaissant le preset (perte audible).
 const audioDefaults: Pick<TrackPublishDefaults, "audioPreset" | "dtx" | "red"> = {
   audioPreset: AudioPresets.speech,
   dtx: true,
-  red: false,
+  red: true,
 };
 
 // Options LiveKit centralisées — réponse à l'incident du 16/07/2026 (932
