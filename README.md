@@ -240,6 +240,14 @@ DATABASE_URL="postgresql://<user>:<password>@127.0.0.1:5432/<database>"
 # ── Plugin Moodle ────────────────────────────────────
 MOODLE_API_KEY=<cle-api-sans-caracteres-speciaux>
 
+# ── SMTP (e-mails, optionnel) ────────────────────────
+SMTP_HOST=smtp.unchk.edu.sn      # absent = envoi ignoré (aucune erreur)
+SMTP_PORT=587                    # 587 STARTTLS / 465 SSL / 25
+SMTP_SECURE=false                # true pour le port 465
+SMTP_USER=
+SMTP_PASS=
+MAIL_FROM="UN-CHK Webinaire <no-reply@unchk.edu.sn>"
+
 # ── Divers ───────────────────────────────────────────
 WATCH_PUBLIC=true
 ```
@@ -612,6 +620,21 @@ Sur `/host`, l'animateur dispose de **deux actions distinctes** (rendu possible 
 | **Terminer** (rouge) | Ferme la session **pour tout le monde** : arrêt de l'enregistrement + `deleteRoom` + `ENDED`. `stop_stream` supprime la salle **d'abord** et ne marque `ENDED` **que si l'arrêt a réussi** (403 non-animateur, 502 LiveKit injoignable) — plus de faux succès. |
 
 > Tout **animateur** (créateur ou co-animateur, via `assertRoomHost`) peut Quitter ou Terminer.
+
+---
+
+## Salon sans animateur — arrêt après 15 min
+
+Quand un salon LIVE n'a plus d'animateur connecté mais garde des spectateurs :
+- Les étudiants voient un **bandeau + chronomètre de 15 min** : « L'enseignant n'est plus dans la session — sans reconnexion, elle sera arrêtée dans mm:ss ».
+- Le **retour d'un animateur remet le compteur à zéro** ; s'il repart, il redémarre.
+- À l'expiration, la **session est arrêtée** (`deleteRoom`) et l'enseignant **prévenu par e-mail**.
+
+Mécanique : marqueur `no_moderator_since` dans les **métadonnées de la salle LiveKit** (aucune migration). Posé/effacé par `/api/session-presence` (sondé par `/watch` ~20 s) et par le cron. Le décompte est piloté côté client pour la précision (`/api/session-timeout`, **re-vérifié serveur** avant d'arrêter) ; le **cron `/api/cron/reconcile-recordings`** sert de filet (`sweepNoModerator`) si aucun onglet étudiant n'est ouvert. Occupation calculée par `getRoomOccupancy` (`lib/controller.ts`), participants système (egress/OBS) exclus.
+
+## Notifications e-mail (SMTP)
+
+`lib/mailer.ts` (nodemailer) envoie des e-mails via SMTP (variables `SMTP_*` / `MAIL_FROM`). **Inerte tant que `SMTP_HOST` est absent** (log, aucune erreur — la fonctionnalité ne casse rien si le SMTP n'est pas configuré). Premier usage câblé : prévenir l'**enseignant** quand sa session est arrêtée automatiquement (sans-animateur 15 min, ou plafond 3 h) — `emailSessionClosed` dans `lib/session-lifecycle.ts`.
 
 ---
 

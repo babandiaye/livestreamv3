@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma"
 const EGRESS_PREFIX = "egress-recorder-"
 const OBS_SUFFIX = " (via OBS)"
 
-function isSystemParticipant(identity: string): boolean {
+export function isSystemParticipant(identity: string): boolean {
   return identity.startsWith(EGRESS_PREFIX) || identity.endsWith(OBS_SUFFIX)
 }
 

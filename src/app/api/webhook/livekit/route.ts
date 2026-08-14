@@ -2,6 +2,7 @@ import { WebhookReceiver, RoomServiceClient, EgressStatus } from "livekit-server
 import { prisma } from "@/lib/prisma"
 import { egressClient, isRecordingEgress, computeEgressOutcome, finalizeRecording } from "@/lib/egress"
 import { recordJoin, recordLeave, closeOrphans } from "@/lib/attendance"
+import { emailSessionClosed } from "@/lib/session-lifecycle"
 import { NextRequest, NextResponse } from "next/server"
 export const dynamic = "force-dynamic"
 
@@ -188,6 +189,8 @@ export async function POST(req: NextRequest) {
         } catch (e) {
           console.warn("[webhook] deleteRoom (limite 3h) ignoré:", roomName, e instanceof Error ? e.message : e)
         }
+        // Prévenir l'enseignant (best-effort, ne bloque pas le webhook).
+        await emailSessionClosed(roomName, "max_duration").catch(() => {})
       }
     }
 

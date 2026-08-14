@@ -1,8 +1,31 @@
 import { NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 import { reconcileStuckRecordings } from "@/lib/egress"
+import { prisma } from "@/lib/prisma"
+import { evaluateNoModerator, closeSessionNoModerator } from "@/lib/session-lifecycle"
 
 export const dynamic = "force-dynamic"
+
+// Filet « salon sans animateur » : le décompte 15 min est piloté côté client
+// (page /watch) pour la précision, mais si aucun onglet étudiant n'est ouvert
+// pour le déclencher, ce balayage ferme quand même les sessions expirées.
+async function sweepNoModerator(): Promise<{ checked: number; closed: number }> {
+  const live = await prisma.session.findMany({
+    where: { status: "LIVE" },
+    select: { roomName: true },
+  })
+  let closed = 0
+  for (const s of live) {
+    try {
+      const state = await evaluateNoModerator(s.roomName)
+      if (state.exists && !state.moderatorPresent && state.expired) {
+        await closeSessionNoModerator(s.roomName)
+        closed++
+      }
+    } catch { /* une salle en erreur ne bloque pas les autres */ }
+  }
+  return { checked: live.length, closed }
+}
 
 // Réconciliation périodique des enregistrements bloqués en PROCESSING.
 //
@@ -36,11 +59,13 @@ async function run(req: NextRequest) {
   }
   const started = Date.now()
   const result = await reconcileStuckRecordings()
+  const noMod = await sweepNoModerator()
   const ms = Date.now() - started
   console.log(
-    `[cron/reconcile] vérifiés=${result.checked} mis à jour=${result.updated} (${ms}ms)`
+    `[cron/reconcile] vérifiés=${result.checked} mis à jour=${result.updated} | ` +
+    `sans-animateur vérifiés=${noMod.checked} fermés=${noMod.closed} (${ms}ms)`
   )
-  return NextResponse.json({ ...result, ms })
+  return NextResponse.json({ ...result, noModerator: noMod, ms })
 }
 
 // POST (usage cron normal) et GET (test manuel) — même logique.

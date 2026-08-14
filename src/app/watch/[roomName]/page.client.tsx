@@ -218,6 +218,11 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [floatingEmojis, setFloatingEmojis] = useState<{id:number;emoji:string;x:number}[]>([]);
   const [sessionEnded, setSessionEnded] = useState(false);
+  // Suivi « salon sans animateur » : instant de début d'absence (epoch ms) et
+  // horloge locale pour le chronomètre 15 min.
+  const [noModSince, setNoModSince] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const lastTimeoutAttemptRef = useRef(0);
 
   const getMeta = (p: Participant): ParticipantMetadata => {
     try { return JSON.parse(p.metadata || "{}"); } catch { return { hand_raised: false, invited_to_stage: false, avatar_image: "" }; }
@@ -228,6 +233,19 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const onStage = myMeta.invited_to_stage;
   const handRaised = myMeta.hand_raised;
   const micOn = localParticipant.isMicrophoneEnabled;
+
+  const NO_MOD_GRACE_MS = 15 * 60 * 1000;
+  const noModRemainingMs = noModSince != null ? Math.max(0, NO_MOD_GRACE_MS - (nowMs - noModSince)) : null;
+
+  // Demande l'arrêt (serveur re-vérifie). Throttle à 15 s pour permettre un
+  // réessai si le serveur n'a pas encore jugé le délai expiré (dérive d'horloge)
+  // sans marteler l'endpoint.
+  const fireTimeout = useCallback(() => {
+    const t = Date.now();
+    if (t - lastTimeoutAttemptRef.current < 15_000) return;
+    lastTimeoutAttemptRef.current = t;
+    fetch(`/api/session-timeout?roomName=${encodeURIComponent(room.name)}`, { method: "POST" }).catch(() => {});
+  }, [room]);
 
   useEffect(() => {
     const handleDisconnect = () => {
@@ -243,6 +261,43 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
     room.on("connectionStateChanged", handleConnectionStateChange)
     return () => { room.off("disconnected", handleDisconnect); room.off("connectionStateChanged", handleConnectionStateChange) }
   }, [room, returnUrl])
+
+  // Sonde le serveur (~20 s) : y a-t-il un animateur ? Sinon, récupère l'instant
+  // de début d'absence pour le chronomètre. Le retour d'un animateur remet le
+  // compteur à zéro (noModSince → null).
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/session-presence?roomName=${encodeURIComponent(room.name)}`);
+        if (!r.ok || cancelled) return;
+        const s = await r.json();
+        const since = s.moderatorPresent ? null : (typeof s.noModeratorSince === "number" ? s.noModeratorSince : null);
+        setNoModSince(since);
+        // Le serveur juge l'expiration (autorité) : s'il la signale, on déclenche
+        // l'arrêt même si le minuteur local a été gelé (onglet en arrière-plan).
+        if (!s.moderatorPresent && s.expired) fireTimeout();
+      } catch { /* silencieux */ }
+    };
+    poll();
+    const iv = setInterval(poll, 20_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [room, fireTimeout]);
+
+  // Ticker 1 s pour le décompte, uniquement quand un compte à rebours est actif.
+  useEffect(() => {
+    if (noModSince == null) return;
+    const iv = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, [noModSince]);
+
+  // À zéro (minuteur au premier plan) : demander l'arrêt. Le sondage ci-dessus
+  // couvre le cas où l'onglet était en arrière-plan (minuteur gelé). fireTimeout
+  // est throttlé, donc les deux voies ne se marchent pas dessus.
+  useEffect(() => {
+    if (noModSince == null || noModRemainingMs == null || noModRemainingMs > 0) return;
+    fireTimeout();
+  }, [noModRemainingMs, noModSince, fireTimeout]);
 
   useEffect(() => {
     if (!onStage) {
@@ -348,6 +403,14 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
 
   return (
     <div className="v-root" style={{ display: "flex", flexDirection: "column", height: "100dvh", background: "#0d1117", color: "#e6edf3", fontFamily: "'Google Sans','Segoe UI',system-ui,sans-serif" }}>
+
+      {/* ── Bandeau « salon sans animateur » + chronomètre 15 min ── */}
+      {noModSince != null && noModRemainingMs != null && !sessionEnded && (
+        <div className="v-nomod-banner">
+          ⚠ L&apos;enseignant n&apos;est plus dans la session — sans reconnexion, elle sera arrêtée dans{" "}
+          <strong>{Math.floor(noModRemainingMs / 60000)}:{String(Math.floor((noModRemainingMs % 60000) / 1000)).padStart(2, "0")}</strong>.
+        </div>
+      )}
 
       {/* ── TOPBAR ── */}
       <div className="v-topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", height: 54, background: "#161b22", borderBottom: "1px solid #21262d", flexShrink: 0 }}>
@@ -567,6 +630,8 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         @keyframes w-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
         @keyframes w-floatUp { 0%{opacity:1;transform:translateY(0) scale(1)} 50%{opacity:1;transform:translateY(-40vh) scale(1.3)} 100%{opacity:0;transform:translateY(-80vh) scale(.8)} }
         @keyframes w-spin { to{transform:rotate(360deg)} }
+        .v-nomod-banner { flex-shrink:0; background:#78350f; color:#fde68a; border-bottom:1px solid #f59e0b; padding:8px 16px; font-size:0.85rem; font-weight:600; text-align:center; }
+        .v-nomod-banner strong { color:#fff; font-variant-numeric:tabular-nums; }
         .v-start-audio { position:absolute;inset:0;background:rgba(1,4,9,.8);color:#e6edf3;border:none;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px); }
 
         /* ===== Responsive ===== Les !important ne servent qu'à battre les styles

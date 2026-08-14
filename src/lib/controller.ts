@@ -220,6 +220,44 @@ export async function hasOtherHostConnected(session: Session): Promise<boolean> 
   }
 }
 
+// Occupation de la salle en UN appel : y a-t-il un modérateur connecté (créateur
+// ou isModerator), et des spectateurs (hors participants SYSTÈME egress/OBS) ?
+// Base du suivi « salon sans animateur ». Renvoie tout à false si la salle
+// n'existe pas côté SFU.
+export async function getRoomOccupancy(
+  room_name: string
+): Promise<{ moderatorPresent: boolean; viewersPresent: boolean }> {
+  const httpUrl = process.env.LIVEKIT_WS_URL!
+    .replace("wss://", "https://")
+    .replace("ws://", "http://");
+  const roomService = new RoomServiceClient(
+    httpUrl,
+    process.env.LIVEKIT_API_KEY!,
+    process.env.LIVEKIT_API_SECRET!
+  );
+  const rooms = await roomService.listRooms([room_name]);
+  if (!rooms.length) return { moderatorPresent: false, viewersPresent: false };
+  let creator_identity: string | undefined;
+  try {
+    creator_identity = (JSON.parse(rooms[0].metadata || "{}") as RoomMetadata).creator_identity;
+  } catch {
+    creator_identity = undefined;
+  }
+  const participants = await roomService.listParticipants(room_name);
+  let moderatorPresent = false;
+  let viewersPresent = false;
+  for (const p of participants) {
+    const id = p.identity ?? "";
+    if (id.startsWith("egress-recorder-") || id.endsWith(" (via OBS)")) continue; // système
+    if ((creator_identity && id === creator_identity) || hasModeratorMetadata(p.metadata)) {
+      moderatorPresent = true;
+    } else {
+      viewersPresent = true;
+    }
+  }
+  return { moderatorPresent, viewersPresent };
+}
+
 // ─── Présence d'un modérateur ─────────────────────────────────────────────────
 
 // Un spectateur ne doit pas pouvoir entrer dans une salle sans animateur.
