@@ -248,6 +248,9 @@ SMTP_USER=
 SMTP_PASS=
 MAIL_FROM="UN-CHK Webinaire <no-reply@unchk.edu.sn>"
 
+# ── Cron (réconciliation enregistrements + sans-animateur) ──
+CRON_SECRET=<secret-long-aleatoire>
+
 # ── Divers ───────────────────────────────────────────
 WATCH_PUBLIC=true
 ```
@@ -798,6 +801,7 @@ docker logs livekit_egress --tail 50
 | **v1.2** | **Qualité vidéo** : options LiveKit centralisées (`lib/livekit-options.ts`) — adaptiveStream, dynacast, plafonds de publication ; suppression de la couche simulcast à demi-résolution du **partage d'écran** (slides illisibles côté participant). Correction ICE **STUN + TURN/UDP** côté SFU (voir Infrastructure) — cause racine du flou. **Responsivité** des pages `/host` et `/watch`. Caméra interdite aux spectateurs montés sur scène (micro + partage d'écran seulement). Tableau blanc : synchronisation d'historique robuste (chunking, anti-tempête, persistance locale, autorisation d'écriture). |
 | **v1.2.1** | **Accès** : un lien `/watch` requiert un **animateur réellement connecté** (403 `NO_MODERATOR` + écran d'information). **Présence** : suppression d'une séance ou d'un participant. **Chat** : export `.txt` de la transcription depuis `/host`. **Utilisateurs** : suppression (avec garde-fous), tris par date de création et par rôle. **Paramètres** : nouvelle table `AppSetting` + réglage « Interdire l'accès aux étudiants » (claim `affiliation`), page `/acces-refuse`. Règle permanente : un étudiant est toujours `VIEWER`. |
 | **v1.3** | **Enregistrements fiables** : verrou anti-doublon, sécurisation de `/api/egress-token` (mandat HMAC signé), critère `READY` = statut + taille > 0 + fichier réellement sur MinIO (`HeadObject`), réconciliation **active** par cron des `PROCESSING` bloqués. **Co-animateur** : `assertRoomHost` (créateur **ou** modérateur connecté), Démarrer/**Rejoindre** une session en cours sans dépossession, tableau blanc de l'egress ouvert à tout animateur. **Provisionnement Moodle** : l'enseignant/tuteur est auto-créé/promu `MODERATOR` (réglage `moodle_auto_moderator`). **Cycle de session** : boutons **Quitter** (sans détruire la salle) / **Terminer**, `stop_stream` sans faux succès. **Plafond 3 h** (`session_limits` egress) + alerte à 2h50. **Design** : bouton micro icône, micro ouvert par défaut sur scène. |
+| **v1.4** | **Salon sans animateur** : si tous les modérateurs quittent alors que des spectateurs restent, bandeau + décompte **15 min** côté `/watch`, arrêt automatique de la session (re-vérifié serveur, filet par cron `sweepNoModerator`) ; le retour d'un animateur réinitialise le compteur. **Notifications e-mail (SMTP)** : `lib/mailer.ts` (nodemailer), inerte si `SMTP_HOST` absent ; STARTTLS forcé (`requireTLS`) sur port 587/25 ; l'enseignant est prévenu à la fermeture automatique (sans-animateur ou plafond 3 h). **Audio** : `red: true` réactivé (correction des micro-coupures constatées en production). |
 
 ---
 
