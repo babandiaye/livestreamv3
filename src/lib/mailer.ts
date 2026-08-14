@@ -21,10 +21,14 @@ function getTransporter(): Transporter | null {
     transporter = null
     return null
   }
+  const secure = process.env.SMTP_SECURE === "true" // true = 465 (SSL), false = 587/25 (STARTTLS)
   transporter = nodemailer.createTransport({
     host,
     port: Number(process.env.SMTP_PORT ?? 587),
-    secure: process.env.SMTP_SECURE === "true", // true = 465 (SSL), false = 587/25 (STARTTLS)
+    secure,
+    // Sur port non-SSL (587/25), FORCER STARTTLS : refuse un envoi en clair si le
+    // serveur ne propose pas le chiffrement (évite toute fuite d'identifiants).
+    requireTLS: !secure,
     auth: process.env.SMTP_USER
       ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS ?? "" }
       : undefined,

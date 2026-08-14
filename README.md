@@ -636,6 +636,14 @@ Mécanique : marqueur `no_moderator_since` dans les **métadonnées de la salle 
 
 `lib/mailer.ts` (nodemailer) envoie des e-mails via SMTP (variables `SMTP_*` / `MAIL_FROM`). **Inerte tant que `SMTP_HOST` est absent** (log, aucune erreur — la fonctionnalité ne casse rien si le SMTP n'est pas configuré). Premier usage câblé : prévenir l'**enseignant** quand sa session est arrêtée automatiquement (sans-animateur 15 min, ou plafond 3 h) — `emailSessionClosed` dans `lib/session-lifecycle.ts`.
 
+**Chiffrement.** `SMTP_SECURE` distingue les deux modes :
+- `SMTP_SECURE=true` → port **465** (SSL implicite dès la connexion) ;
+- `SMTP_SECURE=false` → port **587** (ou 25) : le mailer **force STARTTLS** (`requireTLS`) et **refuse d'envoyer en clair** si le serveur ne propose pas le chiffrement (évite toute fuite d'identifiants).
+
+> ⚠️ Sur le port **587**, mettre `SMTP_SECURE=false` (STARTTLS), **pas** `true` — sinon erreur `wrong version number` (le client tente du SSL sur un port qui attend du STARTTLS).
+
+`sendMail()` ne lève jamais : retourne `true`/`false` et journalise l'échec, pour ne jamais casser le flux métier appelant.
+
 ---
 
 ## Enrôlement CSV
