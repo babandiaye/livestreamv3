@@ -7,6 +7,7 @@ import { TokenContext } from "@/components/token-context";
 import { Chat } from "@/components/chat";
 import { JoinStreamResponse, ParticipantMetadata, RoomMetadata } from "@/lib/controller";
 import { viewerRoomOptions } from "@/lib/livekit-options";
+import { COURSE_REACTIONS } from "@/lib/reactions";
 import { useAuthToken } from "@/components/token-context";
 import dynamic from "next/dynamic";
 const Whiteboard = dynamic(() => import("@/components/whiteboard"), { ssr: false });
@@ -532,8 +533,8 @@ function ViewerRoom({ returnUrl = "/" }: { returnUrl?: string }) {
 
             {showEmojiPicker && (
               <div style={{ position: "absolute", bottom: 100, left: "50%", transform: "translateX(-50%)", background: "#161b22", border: "1px solid #21262d", borderRadius: 12, padding: "12px 16px", display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: 300, boxShadow: "0 8px 32px rgba(0,0,0,.6)", zIndex: 200 }}>
-                {["👍","👏","❤️","😂","😮","🎉","🙌","🔥","💯","👋"].map(e => (
-                  <button key={e} onClick={() => launchEmoji(e)} style={{ width: 42, height: 42, background: "none", border: "none", fontSize: "1.5rem", cursor: "pointer", borderRadius: 8, transition: "background .15s", display: "flex", alignItems: "center", justifyContent: "center" }}>{e}</button>
+                {COURSE_REACTIONS.map(({ emoji, label }) => (
+                  <button key={emoji} title={label} aria-label={label} onClick={() => launchEmoji(emoji)} style={{ width: 42, height: 42, background: "none", border: "none", fontSize: "1.5rem", cursor: "pointer", borderRadius: 8, transition: "background .15s", display: "flex", alignItems: "center", justifyContent: "center" }}>{emoji}</button>
                 ))}
               </div>
             )}

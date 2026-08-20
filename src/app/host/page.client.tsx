@@ -9,6 +9,7 @@ import { Chat } from "@/components/chat";
 import StreamingDialog from "@/components/streaming-dialog";
 import { ParticipantMetadata } from "@/lib/controller";
 import { publisherRoomOptions } from "@/lib/livekit-options";
+import { COURSE_REACTIONS } from "@/lib/reactions";
 import { useAuthToken } from "@/components/token-context";
 import dynamic from "next/dynamic";
 const Whiteboard = dynamic(() => import("@/components/whiteboard"), { ssr: false });
@@ -865,8 +866,8 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
 
       {showEmojiPicker && (
         <div className="h-emoji-picker">
-          {["👍","👏","❤️","😂","😮","🎉","🙌","🔥","💯","👋"].map(e => (
-            <button key={e} className="h-emoji-btn" onClick={() => launchEmoji(e)}>{e}</button>
+          {COURSE_REACTIONS.map(({ emoji, label }) => (
+            <button key={emoji} className="h-emoji-btn" title={label} aria-label={label} onClick={() => launchEmoji(emoji)}>{emoji}</button>
           ))}
         </div>
       )}
