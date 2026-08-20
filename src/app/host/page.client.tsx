@@ -2,7 +2,7 @@
 import React from "react";
 
 import { LiveKitRoom, useLocalParticipant, useParticipants, useRoomContext, VideoTrack, AudioTrack, useTracks, StartAudio, useRoomInfo, useDataChannel } from "@livekit/components-react";
-import { Track, Participant } from "livekit-client";
+import { Track, Participant, RoomEvent, ConnectionState } from "livekit-client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { TokenContext } from "@/components/token-context";
 import { Chat } from "@/components/chat";
@@ -58,6 +58,7 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   const [recordingElapsed, setRecordingElapsed] = useState("00:00");
   const [endWarning, setEndWarning] = useState(false); // alerte 2h50 (arrêt auto à 3h)
   const warnedRef = useRef(false);
+  const [recCheck, setRecCheck] = useState(false); // rappel « vérifiez l'enregistrement » après une reconnexion
 
   const [streamingEgressId, setStreamingEgressId] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
@@ -132,6 +133,33 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
   useEffect(() => {
     try { setShowWhiteboard(JSON.parse(roomMetadata || "{}").whiteboard_open === true); } catch {}
   }, [roomMetadata]);
+
+  // Micro ouvert par défaut : à la PREMIÈRE connexion, on active le micro de
+  // l'animateur. Une seule fois (micDefaultDone) — on ne le rouvre jamais après
+  // une coupure volontaire ni après une reconnexion (LiveKit republie tout seul).
+  const micDefaultDone = useRef(false);
+  useEffect(() => {
+    const enableMicOnce = () => {
+      if (micDefaultDone.current) return;
+      micDefaultDone.current = true;
+      localParticipant
+        .setMicrophoneEnabled(true, { noiseSuppression: true, echoCancellation: true, autoGainControl: true })
+        .catch(() => {});
+    };
+    if (room.state === ConnectionState.Connected) enableMicOnce();
+    room.on(RoomEvent.Connected, enableMicOnce);
+    return () => { room.off(RoomEvent.Connected, enableMicOnce); };
+  }, [room, localParticipant]);
+
+  // Après une reconnexion, rappeler à l'animateur de vérifier son enregistrement :
+  // l'egress tourne côté serveur indépendamment de la connexion, mais une coupure
+  // (surtout suivie d'un rechargement d'onglet) peut semer le doute. Le bandeau
+  // reste affiché jusqu'à ce que l'animateur confirme l'avoir vérifié.
+  useEffect(() => {
+    const onReconnected = () => setRecCheck(true);
+    room.on(RoomEvent.Reconnected, onReconnected);
+    return () => { room.off(RoomEvent.Reconnected, onReconnected); };
+  }, [room]);
 
   const toggleWhiteboard = async () => {
     const next = !showWhiteboard;
@@ -947,6 +975,18 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         </div>
       )}
 
+      {recCheck && (
+        <div className="h-rec-check">
+          <span>
+            🔄 Connexion rétablie —{" "}
+            {recording
+              ? "vérifiez que votre enregistrement est toujours en cours."
+              : "aucun enregistrement actif détecté, pensez à le (re)lancer si nécessaire."}
+          </span>
+          <button className="h-rec-check-btn" onClick={() => setRecCheck(false)}>J&apos;ai vérifié</button>
+        </div>
+      )}
+
       <style>{`
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
         .h-root{display:flex;flex-direction:column;height:100dvh;background:#0d1117;color:#e2e8f0;font-family:'Nunito','Segoe UI',system-ui,sans-serif;}
@@ -1077,6 +1117,9 @@ function HostRoom({ returnUrl = "/" }: { returnUrl?: string }) {
         .h-pmute:hover{background:#fbbf24;color:#1a1a2e;border-color:#fbbf24;}
         .h-mod-toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:#111827;border:1px solid #2d3f52;color:#e2e8f0;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:400;}
         .h-end-warning{position:fixed;top:16px;left:50%;transform:translateX(-50%);max-width:92vw;background:#78350f;border:1px solid #f59e0b;color:#fde68a;padding:10px 18px;border-radius:10px;font-size:0.85rem;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:500;text-align:center;}
+        .h-rec-check{position:fixed;top:64px;left:50%;transform:translateX(-50%);max-width:92vw;display:flex;align-items:center;gap:14px;background:#0c4a6e;border:1px solid #38bdf8;color:#e0f2fe;padding:10px 16px;border-radius:10px;font-size:0.85rem;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:600;text-align:center;}
+        .h-rec-check-btn{background:#38bdf8;color:#0b1220;border:none;border-radius:7px;padding:6px 12px;font-size:0.8rem;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;}
+        .h-rec-check-btn:hover{background:#7dd3fc;}
 
         /* ===== Responsive ===== Éléments propres au mobile, masqués sur desktop.
            Toutes les règles ci-dessous sont confinées sous media queries : au-delà
