@@ -1,7 +1,7 @@
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { NextResponse } from "next/server"
-import { S3Client, HeadBucketCommand } from "@aws-sdk/client-s3"
+import { S3Client, HeadBucketCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3"
 import { RoomServiceClient, EgressClient, IngressClient } from "livekit-server-sdk"
 
 export const dynamic = "force-dynamic"
@@ -50,17 +50,21 @@ async function checkPostgresql(): Promise<ServiceStatus> {
   }
 }
 
+function makeS3Client(): S3Client {
+  return new S3Client({
+    region: process.env.S3_REGION || "us-east-1",
+    endpoint: process.env.S3_ENDPOINT,
+    credentials: {
+      accessKeyId: process.env.S3_ACCESS_KEY!,
+      secretAccessKey: process.env.S3_SECRET!,
+    },
+    forcePathStyle: true,
+  })
+}
+
 async function checkMinio(): Promise<ServiceStatus> {
   try {
-    const s3 = new S3Client({
-      region: process.env.S3_REGION || "us-east-1",
-      endpoint: process.env.S3_ENDPOINT,
-      credentials: {
-        accessKeyId: process.env.S3_ACCESS_KEY!,
-        secretAccessKey: process.env.S3_SECRET!,
-      },
-      forcePathStyle: true,
-    })
+    const s3 = makeS3Client()
     const bucket = process.env.S3_BUCKET!
     const { latency } = await checkWithTimeout(async () => {
       await s3.send(new HeadBucketCommand({ Bucket: bucket }))
@@ -79,6 +83,48 @@ async function checkMinio(): Promise<ServiceStatus> {
       latency: null,
       message: "Connexion échouée",
       details: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
+// Écriture réelle vers MinIO (PutObject puis DeleteObject). Le HeadBucket ci-dessus
+// ne teste que la LECTURE : si le montage NFS derrière MinIO passe en lecture seule,
+// est plein ou devient « stale », le bucket reste lisible mais toute écriture échoue —
+// et donc les enregistrements egress aussi. Ce test exerce le vrai chemin d'écriture.
+async function checkMinioWritable(): Promise<ServiceStatus> {
+  const bucket = process.env.S3_BUCKET!
+  // Clé unique dans un préfixe dédié pour ne pas polluer les enregistrements.
+  const key = `.healthcheck/write-probe-${Date.now()}.txt`
+  try {
+    const s3 = makeS3Client()
+    const { latency } = await checkWithTimeout(async () => {
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: "livestream-status-probe",
+          ContentType: "text/plain",
+        })
+      )
+    })
+    // Nettoyage best-effort : l'écriture est déjà validée, un échec de suppression
+    // (objet minuscule) ne remet pas en cause le résultat.
+    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })).catch(() => {})
+    return {
+      name: "MinIO — écriture (NFS)",
+      status: "ok",
+      latency,
+      message: "Stockage inscriptible (écriture + suppression OK)",
+      details: `${process.env.S3_ENDPOINT} — bucket "${bucket}"`,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return {
+      name: "MinIO — écriture (NFS)",
+      status: "error",
+      latency: null,
+      message: "Écriture refusée — NFS en lecture seule, plein ou inaccessible ?",
+      details: msg,
     }
   }
 }
@@ -265,6 +311,7 @@ export async function GET() {
     checkEgress(),
     checkIngress(),
     checkMinio(),
+    checkMinioWritable(),
     checkWebhook(),
     checkKeycloak(),
   ])
