@@ -98,6 +98,8 @@ export async function computeEgressOutcome(egress: any): Promise<EgressOutcome> 
   if (!size || size <= BigInt(0)) return { status: "FAILED", ...fields }
 
   // 3. Confirmation par le stockage (l'arbitre final).
+  // Bucket absent → objectPresence renvoie "unknown" → PROCESSING (jamais un faux
+  // READY ni un FAILED erroné) : la réconciliation repassera, comportement sûr.
   const bucket = process.env.S3_BUCKET ?? ""
   const presence = await objectPresence(bucket, s3Key)
   if (presence === "present") return { status: "READY", ...fields }

@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
               data: {
                 sessionId: dbSession.id,
                 s3Key: "",
-                s3Bucket: process.env.S3_BUCKET ?? "preprod-webinairerecordings",
+                s3Bucket: process.env.S3_BUCKET!,
                 filename: "Enregistrement en cours…",
                 egressId: egress.egressId,
                 status: "PROCESSING",
@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
             data: {
               sessionId: dbSession.id,
               s3Key: ready ? outcome.s3Key : "",
-              s3Bucket: process.env.S3_BUCKET ?? "preprod-webinairerecordings",
+              s3Bucket: process.env.S3_BUCKET!,
               filename: ready ? outcome.filename : "Enregistrement échoué",
               size: ready ? outcome.size : null,
               duration: ready ? outcome.duration : null,
