@@ -43,13 +43,11 @@ export const viewerRoomOptions: RoomOptions = {
   publishDefaults: {
     ...audioDefaults,
     screenShareEncoding: ScreenSharePresets.h720fps15.encoding,
-    // [] = AUCUNE couche simulcast supplémentaire. Sans ce tableau vide, le SDK
-    // ajoute d'office une couche à demi-résolution
-    // (computeDefaultScreenShareSimulcastPresets, scaleResolutionDownBy: 2) que
-    // adaptiveStream sélectionne dès que le conteneur est plus petit que la
-    // source — d'où du texte encodé en 360p, illisible. Le partage d'écran est
-    // du contenu statique : mieux vaut une seule couche nette.
-    screenShareSimulcastLayers: [],
+    // TEST préprod (03/09/2026) : couche basse h360fps3 pour la dégradation
+    // gracieuse sous réseau contraint (même logique que /host). Avant : [] (une
+    // seule couche nette). Voir la note détaillée dans publisherRoomOptions,
+    // dont l'avertissement sur la lisibilité des slides.
+    screenShareSimulcastLayers: [ScreenSharePresets.h360fps3],
   },
 };
 
@@ -64,13 +62,21 @@ export const publisherRoomOptions: RoomOptions = {
     ...audioDefaults,
     videoEncoding: { maxBitrate: 1_200_000, maxFramerate: 30 },
     videoSimulcastLayers: [VideoPresets.h360, VideoPresets.h180],
-    // Idem côté animateur : l'écran garde l'encodage par défaut du SDK
-    // (h1080fps15, 2,5 Mb/s) mais SANS couche à demi-résolution, sinon les
-    // slides partent en 960×540 chez les participants (constaté le 19/07/2026 :
-    // frameHeight=492 reçu pour une source de 984 px). La caméra, elle, conserve
-    // ses couches h360/h180 — c'est du contenu animé, la dégradation y est
-    // acceptable et nécessaire pour les petits réseaux.
-    screenShareSimulcastLayers: [],
+    // TEST préprod (03/09/2026) — volet « 1 Gb » : le partage d'écran de
+    // l'animateur est le 1er poste de bande passante en amphi (débit × nb de
+    // spectateurs). Deux leviers :
+    //  - écran plafonné à 720p/15 (au lieu du défaut SDK h1080fps15 ~2,5 Mb/s)
+    //    -> ~2× moins de débit par spectateur.
+    //  - UNE couche basse h360fps3 (au lieu de []) pour que congestion_control
+    //    + adaptiveStream servent une version légère aux réseaux contraints au
+    //    lieu de perdre des paquets (retransmissions / flou de gel).
+    // ⚠️ À SURVEILLER pendant le test : lisibilité des slides. Historique 19/07 :
+    //    une couche basse pouvait être choisie par adaptiveStream sur un petit
+    //    conteneur -> texte 360p illisible. Ici la source est déjà 720p et la
+    //    basse n'est qu'un secours ; si des slides floutent SANS cause réseau,
+    //    repasser screenShareSimulcastLayers à [] (ou monter la couche basse).
+    screenShareEncoding: ScreenSharePresets.h720fps15.encoding,
+    screenShareSimulcastLayers: [ScreenSharePresets.h360fps3],
   },
 };
 
@@ -82,10 +88,12 @@ export const publisherRoomOptions: RoomOptions = {
 // - dynacast:false est ici un no-op (dynacast agit côté ÉMETTEUR ; l'egress ne
 //   publie pas), conservé par symétrie/lisibilité.
 // Nuance sortie : le composite est encodé en 1080p, mais « meilleure couche » du
-// host = sa résolution de capture. L'écran/slides (publisherRoomOptions ne plafonne
-// pas screenShareEncoding → défaut SDK ~1080p) est du vrai 1080p ; un plan CAMÉRA
-// plein cadre plafonne à 720p (videoCaptureDefaults) puis est upscalé — compromis
-// assumé depuis l'incident du 16/07.
+// host = sa résolution de capture. Depuis le test « 1 Gb » du 03/09/2026, l'écran
+// est plafonné à 720p15 (screenShareEncoding) : il est donc UPSCALÉ vers le 1080p
+// du composite — les slides ENREGISTRÉES sont un peu moins fines qu'avant, contre-
+// partie assumée de la division par ~2 du débit descendant. Un plan CAMÉRA plein
+// cadre plafonne lui aussi à 720p (videoCaptureDefaults) puis est upscalé —
+// compromis assumé depuis l'incident du 16/07.
 export const egressRoomOptions: RoomOptions = {
   adaptiveStream: false,
   dynacast: false,
