@@ -763,6 +763,49 @@ docker logs livekit_egress --tail 50
 
 ---
 
+## Téléchargement des enregistrements (X-Accel-Redirect)
+
+Depuis la v1.5, **l'application VALIDE, nginx TRANSPORTE** : le runtime Node ne
+streame plus les vidéos (mesuré en prod avant bascule : 528 requêtes / 3,6 Go en
+20 min transitant par next-server).
+
+- `/api/download-recording?key=…&exp=…&sig=…` — **format de lien inchangé** (le
+  plugin Moodle affiche ces liens tels quels). `verifyDownload`
+  (`lib/download-token.ts`) reste le **seul gardien** : signature invalide ou
+  expirée → 403.
+- Après validation, la route répond **corps vide** avec
+  `X-Accel-Redirect: /_media/<bucket>/<clé>?<URL présignée 2 h>` ; nginx
+  proxifie MinIO directement (bloc `location /_media/ { internal; … }` du vhost).
+  Les `Range` sont gérés **nativement** par MinIO/nginx (206/`Content-Range`/416,
+  y compris les suffix-ranges que l'ancien parsing manuel cassait).
+- Les en-têtes (`Content-Type: video/mp4`, `Content-Disposition: inline`,
+  `Cache-Control: public, max-age=3600` **sur le 200 uniquement**) sont portés
+  par des **overrides présignés** : c'est MinIO qui les émet, signés.
+- Le bucket MinIO reste **privé** ; `/_media/` est `internal` (accès direct → 404,
+  MinIO direct sans signature → 403).
+
+> ⚠️ **Prérequis de déploiement (hors git)** : le bloc nginx `/_media/` doit
+> exister **AVANT** de déployer ce code — sinon l'en-tête `X-Accel-Redirect`
+> part au navigateur et **tous les téléchargements cassent**.
+> **Ordre** : déploiement = nginx **puis** app ; retour arrière = app **puis** nginx.
+> En préprod : `webinaire.conf` (backup `bak-media-20260903-215345`).
+
+```nginx
+location /_media/ {
+    internal;
+    proxy_pass http://10.149.2.209:9000/;      # MinIO (préprod ET prod)
+    proxy_set_header Host 10.149.2.209:9000;   # la présignée v4 COUVRE Host
+    proxy_set_header Authorization "";         # évite le conflit presigned+Authorization (400)
+    proxy_buffering off;                       # pas de Go en fichiers temporaires
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_hide_header x-amz-request-id;
+    proxy_hide_header x-amz-id-2;
+}
+```
+
+---
+
 ## Architecture
 
 ```
@@ -802,6 +845,7 @@ docker logs livekit_egress --tail 50
 | **v1.2.1** | **Accès** : un lien `/watch` requiert un **animateur réellement connecté** (403 `NO_MODERATOR` + écran d'information). **Présence** : suppression d'une séance ou d'un participant. **Chat** : export `.txt` de la transcription depuis `/host`. **Utilisateurs** : suppression (avec garde-fous), tris par date de création et par rôle. **Paramètres** : nouvelle table `AppSetting` + réglage « Interdire l'accès aux étudiants » (claim `affiliation`), page `/acces-refuse`. Règle permanente : un étudiant est toujours `VIEWER`. |
 | **v1.3** | **Enregistrements fiables** : verrou anti-doublon, sécurisation de `/api/egress-token` (mandat HMAC signé), critère `READY` = statut + taille > 0 + fichier réellement sur MinIO (`HeadObject`), réconciliation **active** par cron des `PROCESSING` bloqués. **Co-animateur** : `assertRoomHost` (créateur **ou** modérateur connecté), Démarrer/**Rejoindre** une session en cours sans dépossession, tableau blanc de l'egress ouvert à tout animateur. **Provisionnement Moodle** : l'enseignant/tuteur est auto-créé/promu `MODERATOR` (réglage `moodle_auto_moderator`). **Cycle de session** : boutons **Quitter** (sans détruire la salle) / **Terminer**, `stop_stream` sans faux succès. **Plafond 3 h** (`session_limits` egress) + alerte à 2h50. **Design** : bouton micro icône, micro ouvert par défaut sur scène. |
 | **v1.4** | **Salon sans animateur** : si tous les modérateurs quittent alors que des spectateurs restent, bandeau + décompte **15 min** côté `/watch`, arrêt automatique de la session (re-vérifié serveur, filet par cron `sweepNoModerator`) ; le retour d'un animateur réinitialise le compteur. **Notifications e-mail (SMTP)** : `lib/mailer.ts` (nodemailer), inerte si `SMTP_HOST` absent ; STARTTLS forcé (`requireTLS`) sur port 587/25 ; l'enseignant est prévenu à la fermeture automatique (sans-animateur ou plafond 3 h). **Audio** : `red: true` réactivé (correction des micro-coupures constatées en production). |
+| **v1.5** | **Téléchargements via nginx (X-Accel-Redirect)** : l'app ne fait que valider le lien signé, nginx transporte depuis MinIO (présignée 2 h + overrides signés, `Range` natifs) — le runtime Node sort du chemin de données ; **prérequis : bloc nginx `/_media/` AVANT le déploiement** (cf. section dédiée). **Bande passante** : partage d'écran plafonné **720p15** + couche simulcast basse `h360fps3` (dégradation gracieuse sous réseau contraint). **Supervision** : check « MinIO — écriture (NFS) » (PutObject/DeleteObject réels). **Réactions** : emojis pédagogiques explicites avec infobulles. **Animateur** : micro ouvert par défaut à la connexion, rappel « vérifiez l'enregistrement » après reconnexion. **Webhook** : suppression du repli codé en dur sur le bucket préprod (échec explicite si `S3_BUCKET` absent). |
 
 ---
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { verifyDownload } from '@/lib/download-token';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,18 @@ function getS3Client() {
   });
 }
 
+// L'app VALIDE, nginx TRANSPORTE (motif X-Accel-Redirect, 09/2026).
+// Avant, cette route streamait la vidéo depuis MinIO à travers le runtime Node
+// (HeadObject + parsing Range manuel + GetObject) — mesuré en prod : 528
+// requêtes / 3,6 Go en 20 min transitant par next-server. Désormais elle ne
+// fait que vérifier le lien signé puis répond CORPS VIDE avec X-Accel-Redirect
+// vers l'emplacement nginx interne /_media/ (cf. vhost), qui proxifie MinIO
+// directement. nginx/MinIO gèrent nativement les Range (206/Content-Range/416,
+// y compris les suffix-ranges que l'ancien parsing cassait).
+//
+// PRÉREQUIS DE DÉPLOIEMENT : le bloc nginx `location /_media/ { internal; … }`
+// doit exister AVANT ce code, sinon l'en-tête X-Accel-Redirect part au
+// navigateur et tous les téléchargements cassent.
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -31,49 +44,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Lien invalide ou expiré' }, { status: 403 });
     }
 
-    const s3 = getS3Client();
     const bucket = process.env.S3_BUCKET!;
-    const rangeHeader = request.headers.get('range');
-
-    const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    const fileSize = head.ContentLength ?? 0;
     const filename = key.split('/').pop() ?? 'recording.mp4';
+    // La requête du client (Range compris) est rejouée telle quelle par nginx
+    // vers MinIO : on sait donc ici si la réponse finale sera un 200 ou un 206.
+    const isRangeRequest = request.headers.get('range') !== null;
 
-    if (rangeHeader) {
-      const parts = rangeHeader.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunkSize = end - start + 1;
-
-      const response = await s3.send(new GetObjectCommand({
+    // Overrides de réponse SIGNÉS : c'est MinIO lui-même qui émettra
+    // Content-Type / Content-Disposition / Cache-Control (parité exacte avec
+    // l'ancienne route : Cache-Control uniquement sur le 200), sans dépendre
+    // des règles de préséance d'en-têtes du redirect nginx.
+    // expiresIn 2 h : la signature n'est vérifiée qu'à l'ACCEPTATION de la
+    // requête par MinIO (nginx la consomme immédiatement) ; chaque seek du
+    // lecteur repasse ici et obtient une présignée fraîche.
+    const presigned = await getSignedUrl(
+      getS3Client(),
+      new GetObjectCommand({
         Bucket: bucket,
         Key: key,
-        Range: `bytes=${start}-${end}`,
-      }));
+        ResponseContentType: 'video/mp4',
+        ResponseContentDisposition: `inline; filename="${filename}"`,
+        ...(isRangeRequest ? {} : { ResponseCacheControl: 'public, max-age=3600' }),
+      }),
+      { expiresIn: 7200 }
+    );
 
-      return new NextResponse(response.Body as ReadableStream, {
-        status: 206,
-        headers: {
-          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': chunkSize.toString(),
-          'Content-Type': 'video/mp4',
-          'Content-Disposition': `inline; filename="${filename}"`,
-        },
-      });
-    }
-
-    const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-
-    return new NextResponse(response.Body as ReadableStream, {
+    // /_media/<bucket>/<clé>?<query présignée> — pathname/search déjà encodés
+    // par le SDK (path-style, forcePathStyle: true).
+    const u = new URL(presigned);
+    return new NextResponse(null, {
       status: 200,
-      headers: {
-        'Content-Length': fileSize.toString(),
-        'Content-Type': 'video/mp4',
-        'Accept-Ranges': 'bytes',
-        'Content-Disposition': `inline; filename="${filename}"`,
-        'Cache-Control': 'public, max-age=3600',
-      },
+      headers: { 'X-Accel-Redirect': `/_media${u.pathname}${u.search}` },
     });
   } catch (error) {
     return NextResponse.json(
